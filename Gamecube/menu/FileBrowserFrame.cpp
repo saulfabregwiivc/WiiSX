@@ -486,12 +486,14 @@ static void CheckGameAutoFix(void)
 
     // hack for emulating "GPU busy" in some games
     dwEmuFixes = 0;
+    int i;
     for (i = 0; i < autoFixLen; i++)
     {
         if (ChkString(CdromId, gpuBusyAutoFixGames[i], strlen(gpuBusyAutoFixGames[i]))) {
             dwEmuFixes = 0x0001;
         }
     }
+}
 
 void fileBrowserFrame_LoadFile(int i)
 {
