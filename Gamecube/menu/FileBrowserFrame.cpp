@@ -27,6 +27,7 @@
 #include "../libgui/MessageBox.h"
 #include "../libgui/FocusManager.h"
 #include "../libgui/CursorManager.h"
+
 #include "../../PsxCommon.h"
 
 extern "C" {
@@ -451,8 +452,67 @@ extern char CdromId[10];
 extern char CdromLabel[33];
 extern signed char autoSaveLoaded;
 void Func_SetPlayGame();
+void Func_PlayGame();
 extern "C" {
 void newCD(fileBrowser_file *file);
+}
+
+// code for check strings (xjsxjs197)
+int ChkString(char * str1, char * str2, int len)
+{
+	int tmpIdx = 0;
+	while (str1[tmpIdx] == str2[tmpIdx])
+	{
+		tmpIdx++;
+		if (tmpIdx >= len)
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// hack for emulating "gpu busy" in some games
+extern unsigned long dwEmuFixes;
+// For special game correction
+extern unsigned long dwActFixes;
+
+static void CheckGameAutoFix(void)
+{
+    // GPU 'Fake Busy States' hack autoFix
+    int autoFixLen = 2;
+    char gpuBusyAutoFixGames[autoFixLen][10] = {
+	// Hot Wheels Turbo Racing
+         "SLUS00964" // NTSC-U
+        ,"SLES02198" // PAL
+	};
+
+    dwEmuFixes = 0; // hack for emulating "gpu busy" in some games
+    int i;
+    for (i = 0; i < autoFixLen; i++)
+    {
+        if (ChkString(CdromId, gpuBusyAutoFixGames[i], strlen(gpuBusyAutoFixGames[i]))) {
+            dwEmuFixes = 0x0001;
+        }
+    }
+
+    // Special game correction autoFix
+    autoFixLen = 5;
+    char autoFixSpecialGames[autoFixLen][10] = {
+	// Star Wars - Dark Forces
+	 "SLUS00297" // NTSC-U
+	,"SLPS00685" // NTSC-J
+	,"SLES00585" // PAL
+	,"SLES00640" // PAL (Italy)
+	,"SLES00646" // PAL (Spain)
+    };
+    dwActFixes = 0;
+    for (i = 0; i < autoFixLen; i++)
+    {
+        if (ChkString(CdromId, autoFixSpecialGames[i], strlen(autoFixSpecialGames[i]))) {
+            dwActFixes |= 0x100;
+        }
+    }
 }
 
 void fileBrowserFrame_LoadFile(int i)
@@ -471,6 +531,16 @@ void fileBrowserFrame_LoadFile(int i)
 		int ret = loadISO( &dir_entries[i] );
 		
 		if(!ret){	// If the read succeeded.
+			if(Autoboot){
+				// FIXME: The MessageBox is a hacky way to fix input not responding.
+				// No time to improve this...
+				menu::MessageBox::getInstance().setMessage("Autobooting game...");
+				Func_SetPlayGame();
+				Func_PlayGame();
+				pMenuContext->setActiveFrame(MenuContext::FRAME_MAIN);
+				Autoboot = false;
+				return;
+			}
 			strcpy(feedback_string, "Loaded ");
 			strncat(feedback_string, filenameFromAbsPath(dir_entries[i].name), 36-7);
 
@@ -479,8 +549,25 @@ void fileBrowserFrame_LoadFile(int i)
 			strcat(RomInfo,feedback_string);
 			sprintf(buffer,"\nCD-ROM Label: %s\n",CdromLabel);
 			strcat(RomInfo,buffer);
+			CheckGameAutoFix();
 			sprintf(buffer,"CD-ROM ID: %s\n", CdromId);
 			strcat(RomInfo,buffer);
+
+			if (dwEmuFixes)
+			{
+			sprintf(buffer, "GPU 'Fake Busy States' hacked\n");
+			strcat(RomInfo,buffer);
+			}
+			if (dwActFixes)
+			{
+			sprintf(buffer, "Special game auto fixed\n");
+			strcat(RomInfo,buffer);
+			}
+
+			// Switches for painting textured quads as 2 triangles (small glitches, but better shading!)
+			// This function has been automatically started in soft.c and dwActFixes have been determined in gpu code, so need to set it here
+			dwActFixes |= 0x200;
+
 			sprintf(buffer,"ISO Size: %d Mb\n",isoFile.size/1024/1024);
 			strcat(RomInfo,buffer);
 			sprintf(buffer,"Country: %s\n",(!Config.PsxType) ? "NTSC":"PAL");
@@ -547,4 +634,13 @@ void fileBrowserFrame_LoadFile(int i)
 	  }
 	  pMenuContext->setActiveFrame(MenuContext::FRAME_MAIN);
 	}
+}
+
+void fileBrowserFrame_AutoBootFile()
+{
+	int i;
+	for(i = 0; i < num_entries - 1; i++)
+		if(strcasestr(dir_entries[i].name, AutobootROM) != NULL)
+			break;
+	fileBrowserFrame_LoadFile(i);
 }
