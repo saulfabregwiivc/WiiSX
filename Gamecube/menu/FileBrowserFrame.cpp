@@ -477,8 +477,61 @@ extern unsigned long dwActFixes;
 
 static void CheckGameAutoFix(void)
 {
+    // System timing (counters) autoFix
+    int autoFixLen = 34;
+    char autoFixGames[autoFixLen][10] = {
+	// Vandal Hearts
+         "SLUS00447" // NTSC-U
+        ,"SLES00204" // PAL
+        ,"SCPS45183" // NTSC-J
+        ,"SLPM86007" // NTSC-J
+        ,"SLPM86067" // NTSC-J (PlayStation The Best)
+        ,"SLPM87278" // NTSC-J (PSone Books)
+
+	// Vandal Hearts II
+        ,"SLUS00940" // NTSC-U
+        ,"SLES02469" // PAL
+        ,"SLES02496" // PAL (Spain)
+        ,"SLES02497" // PAL (Italy)
+        ,"SCPS45415" // NTSC-J
+        ,"SLPM86251" // NTSC-J
+        ,"SLPM86504" // NTSC-J (Konami The Best)
+        ,"SLPM87279" // NTSC-J (PSone Books)
+
+	// Parasite Eve II
+        ,"SLUS01042" // NTSC-U - Disc 1
+        ,"SLUS01055" // NTSC-U - Disc 2
+        ,"SLES02558" // PAL - Disc 1
+        ,"SLES12558" // PAL - Disc 2
+        ,"SLES02559" // PAL (France) - Disc 1
+        ,"SLES12559" // PAL (France) - Disc 2
+        ,"SLES02560" // PAL (Germany) - Disc 1
+        ,"SLES12560" // PAL (Germany) - Disc 2
+        ,"SLES02561" // PAL (Spain) - Disc 1
+        ,"SLES12561" // PAL (Spain) - Disc 2
+        ,"SLES02562" // PAL (Italy) - Disc 1
+        ,"SLES12562" // PAL (Italy) - Disc 2
+        ,"SCPS45467" // NTSC-J - Disc 1
+        ,"SCPS45468" // NTSC-J - Disc 2
+        ,"SLPS02480" // NTSC-J - Disc 1
+        ,"SLPS02481" // NTSC-J - Disc 2
+        ,"SLPS91479" // NTSC-J (PSone Books) - Disc 1
+        ,"SLPS91480" // NTSC-J (PSone Books) - Disc 2
+        ,"SLPS02779" // NTSC-J (Squaresoft Millennium Collection) - Disc 1
+        ,"SLPS02780" // NTSC-J (Squaresoft Millennium Collection) - Disc 2
+    };
+
+    Config.RCntFix = 0;
+    int i;
+    for (i = 0; i < autoFixLen; i++)
+    {
+        if (ChkString(CdromId, autoFixGames[i], strlen(autoFixGames[i]))) {
+            Config.RCntFix = 1;
+        }
+    }
+
     // GPU 'Fake Busy States' hack autoFix
-    int autoFixLen = 2;
+    autoFixLen = 2;
     char gpuBusyAutoFixGames[autoFixLen][10] = {
 	// Hot Wheels Turbo Racing
          "SLUS00964" // NTSC-U
@@ -486,7 +539,6 @@ static void CheckGameAutoFix(void)
 	};
 
     dwEmuFixes = 0; // hack for emulating "gpu busy" in some games
-    int i;
     for (i = 0; i < autoFixLen; i++)
     {
         if (ChkString(CdromId, gpuBusyAutoFixGames[i], strlen(gpuBusyAutoFixGames[i]))) {

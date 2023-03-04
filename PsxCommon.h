@@ -138,6 +138,7 @@ typedef struct {
 	boolean SlowBoot;
 	boolean Debug;
 	boolean PsxOut;
+	boolean RCntFix;
 	boolean UseNet;
 	boolean icache_emulation;
 	boolean DisableStalls;
