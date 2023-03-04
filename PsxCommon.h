@@ -173,6 +173,8 @@ extern struct PcsxSaveFuncs SaveFuncs;
 	if (Mode == 0) SaveFuncs.read(f, ptr, size); \
 }
 
+#define BIAS	1
+
 #define PSXCLK	33868800	/* 33.8688 MHz */
 
 enum {
