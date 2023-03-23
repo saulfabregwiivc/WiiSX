@@ -352,7 +352,6 @@ int main(int argc, char *argv[])
 	}
 	L2Enhance();
 	VM_Init(1024*1024, 256*1024); // whatever for now, we're not really using this for anything other than mmap on Wii.
-  
 	DI_UseCache(false);
 	if (!__di_check_ahbprot()) {
 		s32 preferred = IOS_GetPreferredVersion();
