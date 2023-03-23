@@ -78,7 +78,6 @@ __inline__ unsigned long GETLE16D(unsigned long *ptr) {
              "rlwinm %0, %0, 16, 0, 31" : "=r" (ret) : "r" (ptr));
     return ret;
 }
-
 __inline__ void PUTLE16(unsigned short *ptr, unsigned short val) {
     __asm__ ("sthbrx %0, 0, %1" : : "r" (val), "r" (ptr) : "memory");
 }
