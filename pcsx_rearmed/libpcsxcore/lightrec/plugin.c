@@ -528,6 +528,8 @@ static void lightrec_plugin_execute_internal(bool block_only)
 
 		if (flags & LIGHTREC_EXIT_SYSCALL)
 			psxException(0x20, 0, (psxCP0Regs *)regs->cp0);
+		if (flags & LIGHTREC_EXIT_BREAK)
+			psxException(0x20, 0, (psxCP0Regs *)regs->cp0);
 	}
 
 	if ((regs->cp0[13] & regs->cp0[12] & 0x300) && (regs->cp0[12] & 0x1)) {
