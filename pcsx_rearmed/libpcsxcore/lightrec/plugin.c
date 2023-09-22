@@ -67,6 +67,8 @@ static bool block_stepping;
 static u32 cycle_mult_to_pcsx; // 22.10 fractional
 static u32 cycle_mult_from_pcsx;
 
+extern u32 lightrec_hacks;
+
 enum my_cp2_opcodes {
 	OP_CP2_RTPS		= 0x01,
 	OP_CP2_NCLIP		= 0x06,
@@ -476,6 +478,8 @@ static int lightrec_plugin_init(void)
 			lightrec_map, ARRAY_SIZE(lightrec_map),
 			&lightrec_ops);
 
+	lightrec_set_unsafe_opt_flags(lightrec_state, lightrec_hacks);
+
 	// fprintf(stderr, "M=0x%lx, P=0x%lx, R=0x%lx, H=0x%lx\n",
 	// 		(uintptr_t) psxM,
 	// 		(uintptr_t) psxP,
@@ -527,9 +531,9 @@ static void lightrec_plugin_execute_internal(bool block_only)
 		}
 
 		if (flags & LIGHTREC_EXIT_SYSCALL)
-			psxException(R3000E_Syscall << 2, 0, (psxCP0Regs *)regs->cp0);
+			psxException(0x20, 0, (psxCP0Regs *)regs->cp0);
 		if (flags & LIGHTREC_EXIT_BREAK)
-			psxException(R3000E_Bp << 2, 0, (psxCP0Regs *)regs->cp0);
+			psxException(0x24, 0, (psxCP0Regs *)regs->cp0);
 	}
 
 	if ((regs->cp0[13] & regs->cp0[12] & 0x300) && (regs->cp0[12] & 0x1)) {
@@ -542,6 +546,8 @@ static void lightrec_plugin_execute_internal(bool block_only)
 static void lightrec_plugin_execute(void)
 {
 	extern int stop;
+
+	lightrec_set_unsafe_opt_flags(lightrec_state, lightrec_hacks);
 
 	while (!stop)
 		lightrec_plugin_execute_internal(false);
@@ -617,6 +623,8 @@ static void lightrec_plugin_reset(void)
 
 	regs->cp0[12] = 0x10900000; // COP0 enabled | BEV = 1 | TS = 1
 	regs->cp0[15] = 0x00000002; // PRevID = Revision ID, same as R3000A
+
+	lightrec_set_unsafe_opt_flags(lightrec_state, lightrec_hacks);
 }
 
 static void lightrec_plugin_sync_regs_from_pcsx(void)
