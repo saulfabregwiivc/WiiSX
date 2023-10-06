@@ -16,7 +16,9 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
- 
+
+#include <libpcsxcore/system.h>
+
 #include <gccore.h>
 #include <malloc.h>
 #include <stdio.h>
@@ -28,15 +30,16 @@
 #include <time.h>
 #include <fat.h>
 #include <aesndlib.h>
-
 #ifdef DEBUGON
 # include <debug.h>
 #endif
-#include "../PsxCommon.h"
+#include <libpcsxcore/psxcommon.h>
+#include <libpcsxcore/r3000a.h>
 #include "wiiSXconfig.h"
 #include "menu/MenuContext.h"
 extern "C" {
-#include "../dfsound/spu_config.h"
+#include <libpcsxcore/lightrec/mem.h>
+#include "../pcsx_rearmed/plugins/dfsound/spu_config.h"
 #include "DEBUG.h"
 #include "fileBrowser/fileBrowser.h"
 #include "fileBrowser/fileBrowser-libfat.h"
@@ -49,6 +52,8 @@ extern "C" {
 #include "vm/vm.h"
 }
 
+#include <psemu_plugin_defs.h>
+
 #ifdef WII
 #include "MEM2.h"
 unsigned int MALLOC_MEM2 = 0;
@@ -58,8 +63,7 @@ extern u32 __di_check_ahbprot(void);
 }
 #endif //WII
 
-u32* xfb[2] = { NULL, NULL };	/*** Framebuffers ***/
-int whichfb = 0;        /*** Frame buffer toggle ***/
+u32* xfb[3] = { NULL, NULL, NULL };	/*** Framebuffers ***/
 GXRModeObj *vmode;				/*** Graphics Mode Object ***/
 #define DEFAULT_FIFO_SIZE ( 256 * 1024 )
 BOOL hasLoadedISO = FALSE;
@@ -73,7 +77,8 @@ fileBrowser_file *biosFile = NULL;  //BIOS file
 FILE *emuLog;
 #endif
 
-PcsxConfig Config;
+extern "C" PcsxConfig Config;
+
 char dynacore;
 char biosDevice;
 char LoadCdBios=0;
@@ -111,7 +116,7 @@ char smbPassWord[CONFIG_STRING_SIZE];
 char smbShareName[CONFIG_STRING_SIZE];
 char smbIpAddr[CONFIG_STRING_SIZE];
 
-int stop = 0;
+extern "C" int stop;
 
 static struct {
 	const char* key;
@@ -143,7 +148,7 @@ static struct {
   { "PadAssign2", &padAssign[1], PADASSIGN_INPUT0, PADASSIGN_INPUT3 },
   { "RumbleEnabled", &rumbleEnabled, RUMBLE_DISABLE, RUMBLE_ENABLE },
   { "LoadButtonSlot", &loadButtonSlot, LOADBUTTON_SLOT0, LOADBUTTON_DEFAULT },
-  { "ControllerType", &controllerType, CONTROLLERTYPE_STANDARD, CONTROLLERTYPE_ANALOG },
+  { "ControllerType", &controllerType, CONTROLLERTYPE_STANDARD, CONTROLLERTYPE_LIGHTGUN },
 //  { "NumberMultitaps", &numMultitaps, MULTITAPS_NONE, MULTITAPS_TWO },
   { "smbusername", smbUserName, CONFIG_STRING_TYPE, CONFIG_STRING_TYPE },
   { "smbpassword", smbPassWord, CONFIG_STRING_TYPE, CONFIG_STRING_TYPE },
@@ -169,7 +174,7 @@ void loadSettings(int argc, char *argv[])
 	printToSD        = 0; // Disable SD logging
 	frameLimit		 = 1; // Auto limit FPS
 	frameSkip		 = 0; // Disable frame skipping
-	iUseDither		 = 1; // Default dithering
+	//iUseDither		 = 1; // Default dithering
 	saveEnabled      = 0; // Don't save game
 	nativeSaveDevice = 0; // SD
 	saveStateDevice	 = 0; // SD
@@ -206,7 +211,16 @@ void loadSettings(int argc, char *argv[])
 	spu_config.iXAPitch = 0;
 	spu_config.iTempo = 0;
 	Config.PsxAuto = 1; //Autodetect
+	Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
 	LoadCdBios = BOOTTHRUBIOS_NO;
+	
+	strcpy(Config.PluginsDir, "plugins");
+	strcpy(Config.Gpu, "builtin_gpu");
+	strcpy(Config.Spu, "builtin_spu");
+	strcpy(Config.Cdr, "builtin_cdr");
+	strcpy(Config.Pad1, "builtin_pad");
+	strcpy(Config.Pad2, "builtin_pad2");
+	strcpy(Config.Net, "Disabled");
 
 	//config stuff
 	fileBrowser_file* configFile_file;
@@ -287,9 +301,15 @@ void loadSettings(int argc, char *argv[])
 #endif
 
 	//Test for Bios file
-	if(biosDevice != BIOSDEVICE_HLE)
-		if(checkBiosExists((int)biosDevice) == FILE_BROWSER_ERROR_NO_FILE)
+	if(biosDevice != BIOSDEVICE_HLE) {
+		if(checkBiosExists((int)biosDevice) == FILE_BROWSER_ERROR_NO_FILE) {
 			biosDevice = BIOSDEVICE_HLE;
+		}
+		else {
+			strcpy(Config.BiosDir, &((biosDevice == BIOSDEVICE_SD) ? &biosDir_libfat_Default : &biosDir_libfat_USB)->name[0]);
+			strcpy(Config.Bios, "/SCPH1001.BIN");
+		}
+	}
 
 	//Synch settings with Config
 	Config.Cpu=dynacore;
@@ -311,23 +331,12 @@ void ShutdownWii()
 }
 #endif
 
-void video_mode_init(GXRModeObj *videomode, u32 *fb1, u32 *fb2)
+void video_mode_init(GXRModeObj *videomode, u32 *fb1, u32 *fb2, u32 *fb3)
 {
 	vmode = videomode;
 	xfb[0] = fb1;
 	xfb[1] = fb2;
-}
-
-// Plugin structure
-extern "C" {
-#include "GamecubePlugins.h"
-PluginTable plugins[] =
-	{ PLUGIN_SLOT_0,
-	  PLUGIN_SLOT_1,
-	  PLUGIN_SLOT_2,
-	  PLUGIN_SLOT_3,
-	  PLUGIN_SLOT_4,
-	  PLUGIN_SLOT_5 };
+	xfb[2] = fb3;
 }
 
 bool Autoboot;
@@ -451,14 +460,16 @@ int loadISO(fileBrowser_file* file)
 	if(SysInit() < 0)
 		return -1;
 	hasLoadedISO = TRUE;
-	SysReset();
 	
 	char *tempStr = &file->name[0];
 	if((strstr(tempStr,".EXE")!=NULL) || (strstr(tempStr,".exe")!=NULL)) {
-		Load(file);
+		//TODO
+		SysReset();
+		//Load(file);
 	}
 	else {
 		CheckCdrom();
+		SysReset();
 		LoadCdrom();
 	}
 	
@@ -474,20 +485,24 @@ int loadISO(fileBrowser_file* file)
 			saveFile_init      = fileBrowser_libfat_init;
 			saveFile_deinit    = fileBrowser_libfat_deinit;
 			break;
-		case NATIVESAVEDEVICE_CARDA:
-		case NATIVESAVEDEVICE_CARDB:
-			// Adjust saveFile pointers
-			saveFile_dir       = (nativeSaveDevice==NATIVESAVEDEVICE_CARDA) ? &saveDir_CARD_SlotA:&saveDir_CARD_SlotB;
-			saveFile_readFile  = fileBrowser_CARD_readFile;
-			saveFile_writeFile = fileBrowser_CARD_writeFile;
-			saveFile_init      = fileBrowser_CARD_init;
-			saveFile_deinit    = fileBrowser_CARD_deinit;
-			break;
+		//case NATIVESAVEDEVICE_CARDA:
+		//case NATIVESAVEDEVICE_CARDB:
+		//	// Adjust saveFile pointers
+		//	saveFile_dir       = (nativeSaveDevice==NATIVESAVEDEVICE_CARDA) ? &saveDir_CARD_SlotA:&saveDir_CARD_SlotB;
+		//	saveFile_readFile  = fileBrowser_CARD_readFile;
+		//	saveFile_writeFile = fileBrowser_CARD_writeFile;
+		//	saveFile_init      = fileBrowser_CARD_init;
+		//	saveFile_deinit    = fileBrowser_CARD_deinit;
+		//	break;
 		}
 		// Try loading everything
 		saveFile_init(saveFile_dir);
-		LoadMcd(1,saveFile_dir);
-		LoadMcd(2,saveFile_dir);
+		
+		sprintf(Config.Mcd1,"%s/%s.mcd",saveFile_dir,CdromId);
+		sprintf(Config.Mcd2,"%s/%s-2.mcd",saveFile_dir,CdromId);
+		SysPrintf("Memory cards:\r\nMcd1 [%s]\r\nMcd2 [%s]\r\n", Config.Mcd1, Config.Mcd2);
+		LoadMcds(Config.Mcd1, Config.Mcd2);
+		
 		saveFile_deinit(saveFile_dir);
 		
 		switch (nativeSaveDevice)
@@ -498,12 +513,12 @@ int loadISO(fileBrowser_file* file)
 		case NATIVESAVEDEVICE_USB:
 			autoSaveLoaded = NATIVESAVEDEVICE_USB;
 			break;
-		case NATIVESAVEDEVICE_CARDA:
-			autoSaveLoaded = NATIVESAVEDEVICE_CARDA;
-			break;
-		case NATIVESAVEDEVICE_CARDB:
-			autoSaveLoaded = NATIVESAVEDEVICE_CARDB;
-			break;
+		//case NATIVESAVEDEVICE_CARDA:
+		//	autoSaveLoaded = NATIVESAVEDEVICE_CARDA;
+		//	break;
+		//case NATIVESAVEDEVICE_CARDB:
+		//	autoSaveLoaded = NATIVESAVEDEVICE_CARDB;
+		//	break;
 		}
 	}	
 	
@@ -577,9 +592,13 @@ int SysInit() {
 #endif
 	Config.Cpu = dynacore;  //cpu may have changed  
 	psxInit();
-	LoadPlugins();
-	if(OpenPlugins() < 0)
+	if(LoadPlugins() < 0) {
+		SysPrintf("LoadPlugins() failed!\r\n");
+	}
+	if(OpenPlugins() < 0){
+		SysPrintf("LoadPlugins() failed!\r\n");
 		return -1;
+	}
   
 	//Init biosFile pointers and stuff
 	if(biosDevice != BIOSDEVICE_HLE) {
@@ -595,16 +614,22 @@ int SysInit() {
 		memcpy(biosFile,biosFile_dir,sizeof(fileBrowser_file));
 		strcat(biosFile->name, "/SCPH1001.BIN");
 		biosFile_init(biosFile);  //initialize the bios device (it might not be the same as ISO device)
-		Config.HLE = BIOS_USER_DEFINED;
+		Config.HLE = 0;
 	} else {
-		Config.HLE = BIOS_HLE;
+		Config.HLE = 1;
 	}
 
 	return 0;
 }
 
+extern void pl_timing_prepare(int is_pal_);
+int g_emu_resetting;
 void SysReset() {
+	g_emu_resetting = 1;
+	// reset can run code, timing must be set
+	pl_timing_prepare(Config.PsxType);
 	psxReset();
+	g_emu_resetting = 0;
 }
 
 void SysStartCPU() {
@@ -612,6 +637,9 @@ void SysStartCPU() {
 	stop = 0;
 	psxCpu->Execute();
 }
+
+extern "C" void ClosePlugins();
+extern "C" void ReleasePlugins();
 
 void SysClose() 
 {
@@ -655,25 +683,6 @@ void SysPrintf(const char *fmt, ...)
 #endif
 }
 
-void *SysLoadLibrary(const char *lib) 
-{
-	int i;
-	for(i=0; i<NUM_PLUGINS; i++)
-		if((plugins[i].lib != NULL) && (!strcmp(lib, plugins[i].lib)))
-			return (void*)i;
-	return NULL;
-}
-
-void *SysLoadSym(void *lib, const char *sym) 
-{
-	PluginTable* plugin = plugins + (int)lib;
-	int i;
-	for(i=0; i<plugin->numSyms; i++)
-		if(plugin->syms[i].sym && !strcmp(sym, plugin->syms[i].sym))
-			return plugin->syms[i].pntr;
-	return NULL;
-}
-
 int framesdone = 0;
 void SysUpdate() 
 {
@@ -682,7 +691,90 @@ void SysUpdate()
 
 void SysRunGui() {}
 void SysMessage(const char *fmt, ...) {}
-void SysCloseLibrary(void *lib) {}
-const char *SysLibError() {	return NULL; }
+
+void pl_gun_byte2(int port, unsigned char byte)
+{
+}
+
+
+/* TODO: Should be populated properly */
+int in_type[8] = {
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE
+};
+
+/* 0x000000 -> 0x200000: RAM (2 MiB)
+ * 0x200000 -> 0x210000: Parallel port (64 KiB)
+ * 0x210000 -> 0x220000: Scratchpad + I/O registers
+ * 0x220000 -> 0x2a0000: BIOS
+ * 0x2a0000 -> 0x6a0000: Code buffer (4 MiB) */
+static s8 lightrec_buf[0x2a0000 + CODE_BUFFER_SIZE] __attribute__((aligned(4096)));
+
+extern void * code_buffer;
+
+static bool lightrec_mmap_inited;
+
+#ifndef MAP_OFFSET
+#define MAP_OFFSET 0x0
+#endif
+
+int lightrec_init_mmap(void)
+{
+	if (lightrec_mmap_inited)
+		return 0;
+
+	psxP = &lightrec_buf[0x200000];
+
+	if (lightrec_mmap(lightrec_buf, MAP_OFFSET, 0x200000)
+	    || lightrec_mmap(lightrec_buf, MAP_OFFSET + 0x200000, 0x200000)
+	    || lightrec_mmap(lightrec_buf, MAP_OFFSET + 0x400000, 0x200000)
+	    || lightrec_mmap(lightrec_buf, MAP_OFFSET + 0x600000, 0x200000)) {
+		SysMessage(_("Error mapping RAM"));
+		return -1;
+	}
+
+	psxM = (s8 *) MAP_OFFSET;
+
+	if (lightrec_mmap(&lightrec_buf[0x220000],
+			  MAP_OFFSET + 0x1fc00000, 0x80000)) {
+		SysMessage(_("Error mapping BIOS"));
+		return -1;
+	}
+
+	psxR = (s8 *) (MAP_OFFSET + 0x1fc00000);
+
+	if (lightrec_mmap(&lightrec_buf[0x210000],
+			  MAP_OFFSET + 0x1f800000, 0x10000)) {
+		SysMessage(_("Error mapping I/O"));
+		return -1;
+	}
+
+	psxH = (s8 *) (MAP_OFFSET + 0x1f800000);
+
+	if (lightrec_mmap(&lightrec_buf[0x2a0000],
+			  MAP_OFFSET + 0x800000, CODE_BUFFER_SIZE)) {
+		SysMessage(_("Error mapping I/O"));
+		return -1;
+	}
+
+	code_buffer = (void *)(MAP_OFFSET + 0x800000);
+	lightrec_mmap_inited = true;
+
+	return 0;
+}
+
+void lightrec_free_mmap(void)
+{
+}
+
+void PreSaveState() {
+	psxM = lightrec_buf;
+}
+
+void PostSaveState() {
+	psxM = (s8 *) MAP_OFFSET;
+}
 
 } //extern "C"
