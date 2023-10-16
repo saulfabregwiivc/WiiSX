@@ -29,7 +29,7 @@
 #include "../libgui/CursorManager.h"
 
 #include <libpcsxcore/psxcommon.h>
-#include "../../pcsx_rearmed/libpcsxcore/database.h"
+#include <libpcsxcore/database.h>
 
 extern "C" {
 #include "../fileBrowser/fileBrowser.h"
@@ -454,6 +454,7 @@ extern char CdromLabel[33];
 extern signed char autoSaveLoaded;
 void Func_SetPlayGame();
 void Func_PlayGame();
+void Apply_Hacks_Cdrom();
 extern "C" {
 void newCD(fileBrowser_file *file);
 }
