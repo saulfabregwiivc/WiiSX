@@ -29,7 +29,7 @@
 #include "../libgui/CursorManager.h"
 
 #include <libpcsxcore/psxcommon.h>
-#include <libpcsxcore/database.h>
+#include "../../pcsx_rearmed/libpcsxcore/database.h"
 
 extern "C" {
 #include "../fileBrowser/fileBrowser.h"
