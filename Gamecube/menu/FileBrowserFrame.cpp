@@ -454,7 +454,7 @@ extern char CdromLabel[33];
 extern signed char autoSaveLoaded;
 void Func_SetPlayGame();
 void Func_PlayGame();
-void Apply_Hacks_Cdrom();
+extern void Apply_Hacks_Cdrom();
 extern "C" {
 void newCD(fileBrowser_file *file);
 }
