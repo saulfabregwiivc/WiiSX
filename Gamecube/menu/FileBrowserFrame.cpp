@@ -29,6 +29,7 @@
 #include "../libgui/CursorManager.h"
 
 #include <libpcsxcore/psxcommon.h>
+#include <libpcsxcore/database.h>
 
 extern "C" {
 #include "../fileBrowser/fileBrowser.h"
@@ -474,6 +475,7 @@ void fileBrowserFrame_LoadFile(int i)
 		
 		if(!ret){	// If the read succeeded.
 			if(Autoboot){
+				Apply_Hacks_Cdrom();
 				// Wiimpathy:
 				// FIXME: The MessageBox is a hacky way to fix input not responding.
 				// No time to improve this...
@@ -498,6 +500,7 @@ void fileBrowserFrame_LoadFile(int i)
 			strncat(RomInfo, CdromLabel, x < sizeof(CdromLabel) ? x+1 : sizeof(CdromLabel));
 			sprintf(buffer,"\nCD-ROM ID: %s\n", CdromId);
 			strcat(RomInfo,buffer);
+			Apply_Hacks_Cdrom();
 			sprintf(buffer,"ISO Size: %d Mb\n",isoFile.size/1024/1024);
 			strcat(RomInfo,buffer);
 			sprintf(buffer,"Country: %s\n",(!Config.PsxType) ? "NTSC":"PAL");
