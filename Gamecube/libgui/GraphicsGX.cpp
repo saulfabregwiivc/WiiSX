@@ -20,6 +20,7 @@
 
 #include <math.h>
 #include "GraphicsGX.h"
+#include "../wiiSXconfig.h"
 
 extern "C" unsigned int usleep(unsigned int us);
 void video_mode_init(GXRModeObj *rmode, u32 *fb1, u32 *fb2, u32 *fb3);
@@ -153,6 +154,11 @@ void Graphics::init()
 
 void Graphics::drawInit()
 {
+	vmode->viWidth = 704;
+	vmode->viXOrigin = (VI_MAX_WIDTH_PAL - vmode->viWidth) / 2;
+	VIDEO_Init ();
+	VIDEO_Configure (vmode);
+	VIDEO_Flush ();
 	// Reset various parameters from gfx plugin
 	GX_SetZTexture(GX_ZT_DISABLE,GX_TF_Z16,0);	//GX_ZT_DISABLE or GX_ZT_REPLACE; set in gDP.cpp
 	GX_SetZCompLoc(GX_TRUE);	// Do Z-compare before texturing.
@@ -500,6 +506,16 @@ float Graphics::getCurrentTransparency(int index)
 	float alpha = (float)currentColor[index].a/255.0f;
 	float val = alpha * transparency;
 	return val;
+}
+
+void Graphics::setInGameVMode() {
+	// Set deflicker
+	vmode->viWidth = 640;
+	vmode->viXOrigin = (VI_MAX_WIDTH_PAL - vmode->viWidth) / 2;
+	VIDEO_Init ();
+	VIDEO_Configure (vmode);
+	VIDEO_Flush ();
+	GX_SetCopyFilter(vmode->aa,vmode->sample_pattern,deflicker ? GX_TRUE : GX_FALSE,vmode->vfilter);
 }
 
 } //namespace menu 

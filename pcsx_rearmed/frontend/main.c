@@ -24,6 +24,7 @@
 #include "../libpcsxcore/misc.h"
 #include "../libpcsxcore/cheat.h"
 #include "../libpcsxcore/sio.h"
+#include "../libpcsxcore/database.h"
 #include "../libpcsxcore/new_dynarec/new_dynarec.h"
 #include "../plugins/cdrcimg/cdrcimg.h"
 #include "../plugins/dfsound/spu_config.h"
@@ -141,20 +142,15 @@ void emu_set_default_config(void)
 	pl_rearmed_cbs.gpu_neon.enhancement_no_main = 0;
 	pl_rearmed_cbs.gpu_peops.iUseDither = 0;
 	pl_rearmed_cbs.gpu_peops.dwActFixes = 1<<7;
-#if 0
-	pl_rearmed_cbs.gpu_senquack.ilace_force = 0;
-	pl_rearmed_cbs.gpu_senquack.pixel_skip = 0;
-	pl_rearmed_cbs.gpu_senquack.lighting = 1;
-	pl_rearmed_cbs.gpu_senquack.fast_lighting = 0;
-	pl_rearmed_cbs.gpu_senquack.blending = 1;
-	pl_rearmed_cbs.gpu_senquack.dithering = 0;
-#else
+	pl_rearmed_cbs.gpu_unai.ilace_force = 0;
+	pl_rearmed_cbs.gpu_unai.pixel_skip = 0;
 	pl_rearmed_cbs.gpu_unai.lighting = 1;
+	pl_rearmed_cbs.gpu_unai.fast_lighting = 0;
 	pl_rearmed_cbs.gpu_unai.blending = 1;
-#endif
-	pl_rearmed_cbs.gpu_unai.abe_hack =
-	pl_rearmed_cbs.gpu_unai.no_light =
-	pl_rearmed_cbs.gpu_unai.no_blend = 0;
+	pl_rearmed_cbs.gpu_unai.dithering = 0;
+	pl_rearmed_cbs.gpu_unai_old.abe_hack =
+	pl_rearmed_cbs.gpu_unai_old.no_light =
+	pl_rearmed_cbs.gpu_unai_old.no_blend = 0;
 	memset(&pl_rearmed_cbs.gpu_peopsgl, 0, sizeof(pl_rearmed_cbs.gpu_peopsgl));
 	pl_rearmed_cbs.gpu_peopsgl.iVRamSize = 64;
 	pl_rearmed_cbs.gpu_peopsgl.iTexGarbageCollection = 1;
@@ -292,6 +288,10 @@ do_state_slot:
 				SysMessage("GPU_open returned %d", ret);
 		}
 		return;
+	case SACTION_ANALOG_TOGGLE:
+		ret = padToggleAnalog(0);
+		snprintf(hud_msg, sizeof(hud_msg), "ANALOG %s", ret ? "ON" : "OFF");
+		break;
 #endif
 	default:
 		return;
@@ -418,7 +418,11 @@ void emu_on_new_cd(int show_hud_msg)
 	}
 
 	if (show_hud_msg) {
-		snprintf(hud_msg, sizeof(hud_msg), BOOT_MSG);
+		if (check_unsatisfied_libcrypt())
+			snprintf(hud_msg, sizeof(hud_msg),
+				"LibCrypt protected game with missing SBI detected");
+		else
+			snprintf(hud_msg, sizeof(hud_msg), BOOT_MSG);
 		hud_new_msg = 3;
 	}
 }
@@ -590,6 +594,7 @@ int main(int argc, char *argv[])
 {
 	char file[MAXPATHLEN] = "";
 	char path[MAXPATHLEN];
+	char isofilename[MAXPATHLEN];
 	const char *cdfile = NULL;
 	const char *loadst_f = NULL;
 	int psxout = 0;
@@ -608,8 +613,6 @@ int main(int argc, char *argv[])
 			SysPrintf("Using config file %s.\n", cfgfile_basename);
 		}
 		else if (!strcmp(argv[i], "-cdfile")) {
-			char isofilename[MAXPATHLEN];
-
 			if (i+1 >= argc) break;
 			strncpy(isofilename, argv[++i], MAXPATHLEN);
 			if (isofilename[0] != '/') {
@@ -810,7 +813,7 @@ void SysReset() {
 	// reset can run code, timing must be set
 	pl_timing_prepare(Config.PsxType);
 
-   // hmh core forgets this
+	// hmh core forgets this
 	CDR_stop();
    
 	EmuReset();
@@ -1099,7 +1102,7 @@ void *SysLoadSym(void *lib, const char *sym) {
 
 const char *SysLibError() {
 #if defined(NO_DYLIB)
-   return NULL;
+	return NULL;
 #elif !defined(_WIN32)
 	return dlerror();
 #else

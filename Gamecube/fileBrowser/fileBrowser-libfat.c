@@ -22,34 +22,32 @@
  *
 **/
 
-
 #include <fat.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/dir.h>
 #include <dirent.h>
 #include "fileBrowser.h"
 #include <sdcard/gcsd.h>
+#include <ogc/mmce.h>
 #include <iso9660.h>
 #include <di/di.h>
 #include <ogc/dvd.h>
+#include "m2loader.h"
 
 
 #ifdef HW_RVL
 #include <sdcard/wiisd_io.h>
 #include <ogc/usbstorage.h>
-const DISC_INTERFACE* frontsd = &__io_wiisd;
-const DISC_INTERFACE* usb = &__io_usbstorage;
-const DISC_INTERFACE* dvd = &__io_wiidvd;
-const DISC_INTERFACE* carda = &__io_gcsda;
-const DISC_INTERFACE* cardb = &__io_gcsdb;
-
+static DISC_INTERFACE* frontsd = &__io_wiisd;
+static DISC_INTERFACE* usb = &__io_usbstorage;
+static DISC_INTERFACE* dvd = &__io_wiidvd;
 #else
-const DISC_INTERFACE* dvd = &__io_gcdvd;
-const DISC_INTERFACE* carda = &__io_gcsda;
-const DISC_INTERFACE* cardb = &__io_gcsdb;
-const DISC_INTERFACE* sd2sp2 = &__io_gcsd2;
+static DISC_INTERFACE* dvd = &__io_gcdvd;
+static DISC_INTERFACE* gcloader = &__io_gcode;
+static DISC_INTERFACE* m2loader = &__io_m2ldr;
 #endif
 
 fileBrowser_file topLevel_libfat_Default =
@@ -57,7 +55,8 @@ fileBrowser_file topLevel_libfat_Default =
 	  0, // sector
 	  0, // offset
 	  0, // size
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 fileBrowser_file topLevel_libfat_USB =
@@ -65,7 +64,8 @@ fileBrowser_file topLevel_libfat_USB =
 	  0, // sector
 	  0, // offset
 	  0, // size
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 fileBrowser_file topLevel_DVD =
@@ -73,7 +73,8 @@ fileBrowser_file topLevel_DVD =
 	  0, // sector
 	  0, // offset
 	  0, // size
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 fileBrowser_file saveDir_libfat_Default =
@@ -81,7 +82,8 @@ fileBrowser_file saveDir_libfat_Default =
 	  0,
 	  0,
 	  0,
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 fileBrowser_file saveDir_libfat_USB =
@@ -89,7 +91,8 @@ fileBrowser_file saveDir_libfat_USB =
 	  0,
 	  0,
 	  0,
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 	  
 fileBrowser_file biosDir_libfat_Default =
@@ -97,7 +100,8 @@ fileBrowser_file biosDir_libfat_Default =
 	  0,
 	  0,
 	  0,
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 fileBrowser_file biosDir_libfat_USB =
@@ -105,7 +109,8 @@ fileBrowser_file biosDir_libfat_USB =
 	  0,
 	  0,
 	  0,
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 	 
 fileBrowser_file biosDir_DVD =
@@ -113,7 +118,8 @@ fileBrowser_file biosDir_DVD =
 	  0,
 	  0,
 	  0,
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  NULL
 	 };
 
 
@@ -125,10 +131,13 @@ int fileBrowser_libfat_readDir(fileBrowser_file* file, fileBrowser_file** dir){
 	struct stat fstat;
 	
 	// Set everything up to read
-	int num_entries = 2, i = 0;
+	int num_entries = 1, i = 0;
 	*dir = malloc( num_entries * sizeof(fileBrowser_file) );
 	// Read each entry of the directory
 	while( (entry = readdir(dp)) != NULL ){
+		if(!strcmp(entry->d_name,".")) {
+			continue;
+		}
 		// Make sure we have room for this one
 		if(i == num_entries){
 			++num_entries;
@@ -145,7 +154,7 @@ int fileBrowser_libfat_readDir(fileBrowser_file* file, fileBrowser_file** dir){
 	
 	closedir(dp);
 
-	return num_entries;
+	return i;
 }
 
 int fileBrowser_libfat_open(fileBrowser_file* file) {
@@ -191,6 +200,38 @@ int fileBrowser_libfat_writeFile(fileBrowser_file* file, void* buffer, unsigned 
 	return bytes_read;
 }
 
+
+char *getDeviceName() {
+	struct statvfs buf;
+	memset(&buf, 0, sizeof(struct statvfs));
+	
+	int res = statvfs("/", &buf);
+	if(res) {
+		return "Unknown device";
+	}
+	int fsid = buf.f_fsid;
+	
+	if(fsid == DEVICE_TYPE_GAMECUBE_SD(0)) {
+		return "SD (Slot A)";
+	}
+	if(fsid == DEVICE_TYPE_GAMECUBE_SD(1)) {
+		return "SD (Slot B)";
+	}
+	if(fsid == DEVICE_TYPE_GAMECUBE_SD(2)) {
+		return "SD (Serial Port 2)";
+	}
+	if(fsid == DEVICE_TYPE_GAMECUBE_MMCE(0)) {
+		return "SD via MMCE (Slot A)";
+	}
+	if(fsid == DEVICE_TYPE_GAMECUBE_MMCE(1)) {
+		return "SD via MMCE (Slot B)";
+	}
+	if(fsid == DEVICE_TYPE_GAMECUBE_MMCE(2)) {
+		return "SD via MMCE (Serial Port 2)";
+	}
+	return "Unknown device";
+}
+
 /* call fileBrowser_libfat_init as much as you like for all devices
     - returns 0 on device not present/error
     - returns 1 on ok
@@ -202,41 +243,72 @@ int fileBrowser_libfat_init(fileBrowser_file* f){
 #ifdef HW_RVL
   	if(f->name[0] == 's') {      //SD
 		if((res = fatMountSimple ("sd", frontsd))) {
-				res = 1;
+				f->deviceName = "SD (Front Slot)";
+				return 1;
 		}
-		else if(!res && fatMountSimple ("sd", carda)) {
-			res = 1;
+		res = fatMountSimple ("sd", get_io_gcsda());
+		if(res) {
+			f->deviceName = getDeviceName();
+			return res;
 		}
-		else if(!res && fatMountSimple ("sd", cardb)) {
-			res = 1;
+		res = fatMountSimple ("sd", get_io_gcsdb());
+		if(res) {
+			f->deviceName = getDeviceName();
+			return res;
 		}
  	}
 	else if(f->name[0] == 'u') {	// USB
-		if(fatMountSimple ("usb", usb)) {
-			res = 1;
+		int retries = 3;
+		for(int i = 0; i < retries; i++) {
+			if(fatMountSimple ("usb", usb)) {
+				res = 1;
+				break;
+			}
+			// my USB devices really seem to need this.
+			sleep(1);
+			if(res) break;
 		}
+		if(res) f->deviceName = "USB";
 	}
 	else if(f->name[0] == 'd') {	// DVD
 		if(ISO9660_Mount("dvd", dvd)) {
 			res = 1;
+			f->deviceName = "DVD (ISO9660)";
 		}
 	}
 	return res;
 #else
 	if(f->name[0] == 's') {
-		if(sd2sp2->startup()) {
-			res = fatMountSimple ("sd", sd2sp2);
+		res = fatMountSimple ("sd", m2loader);
+		if(res) {
+			f->deviceName = "M2Loader";
+			return res;
 		}
-		if(!res && carda->startup()) {
-			res = fatMountSimple ("sd", carda);
+		res = fatMountSimple ("sd", gcloader);
+		if(res) {
+			f->deviceName = "GCLoader";
+			return res;
 		}
-		if(!res && cardb->startup()) {
-			res = fatMountSimple ("sd", cardb);
+		res = fatMountSimple ("sd", get_io_gcsd2());
+		if(res) {
+			f->deviceName = getDeviceName();
+			return res;
+		}
+		res = fatMountSimple ("sd", get_io_gcsda());
+		if(res) {
+			f->deviceName = getDeviceName();
+			return res;
+		}
+		res = fatMountSimple ("sd", get_io_gcsdb());
+		if(res) {
+			f->deviceName = getDeviceName();
+			return res;
 		}
 	}
 	else if(f->name[0] == 'd') {	// DVD
 		if(ISO9660_Mount("dvd", dvd)) {
 			res = 1;
+			f->deviceName = "DVD (ISO9660)";
 		}
 	}
 	return res; 				// Already mounted
@@ -263,26 +335,8 @@ int fileBrowser_libfat_deinit(fileBrowser_file* f){
  * - Holds the same fat file handle to avoid fopen/fclose
  */
 
-static FILE* fd;
 
 int fileBrowser_libfatROM_deinit(fileBrowser_file* f){
-  if(fd) {
-		fclose(fd);
-	}
-	
-	fd = NULL;
-	return 0;
 }
 
-int fileBrowser_libfatROM_readFile(fileBrowser_file* file, void* buffer, unsigned int length){
-    if(!fd) fd = fopen( file->name, "rb");
-
-	fseek(fd, file->offset, SEEK_SET);
-	int bytes_read = fread(buffer, 1, length, fd);
-	if(bytes_read > 0) {
-  	file->offset += bytes_read;
-	}
-
-	return bytes_read;
-}
 

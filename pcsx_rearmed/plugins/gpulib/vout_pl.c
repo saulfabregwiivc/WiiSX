@@ -29,9 +29,11 @@ static void check_mode_change(int force)
 {
   int w = gpu.screen.hres;
   int h = gpu.screen.vres;
-  int w_out = w;
-  int h_out = h;
+  int w_out, h_out, bpp = 16;
 
+  if (gpu.state.screen_centering_type == C_BORDERLESS)
+    h = gpu.screen.h;
+  w_out = w, h_out = h;
 #ifdef RAW_FB_DISPLAY
   w = w_out = 1024, h = h_out = 512;
 #endif
@@ -42,6 +44,11 @@ static void check_mode_change(int force)
   if (gpu.state.enhancement_active) {
     w_out *= 2;
     h_out *= 2;
+  }
+  if (gpu.status & PSX_GPU_STATUS_RGB24) {
+    // some asm relies on this alignment
+    w_out = (w_out + 7) & ~7;
+    bpp = 24;
   }
 
   gpu.state.downscale_active =
@@ -61,8 +68,8 @@ static void check_mode_change(int force)
     gpu.state.w_out_old = w_out;
     gpu.state.h_out_old = h_out;
 
-    cbs->pl_vout_set_mode(w_out, h_out, w, h,
-          (gpu.status & PSX_GPU_STATUS_RGB24) ? 24 : 16);
+    if (w_out != 0 && h_out != 0)
+      cbs->pl_vout_set_mode(w_out, h_out, w, h, bpp);
   }
 }
 
@@ -93,6 +100,8 @@ void vout_update(void)
     if (!gpu.state.enhancement_was_active)
       return; // buffer not ready yet
     vram = gpu.get_enhancement_bufer(&src_x, &src_y, &w, &h, &vram_h);
+    if (vram == NULL)
+      return;
     x *= 2; y *= 2;
     src_x2 *= 2;
   }

@@ -51,7 +51,8 @@ fileBrowser_file topLevel_SMB =
 	  0ULL,      // discoffset (u64)
 	  0,         // offset
 	  0,         // size
-	  FILE_BROWSER_ATTR_DIR
+	  FILE_BROWSER_ATTR_DIR,
+	  "SMB"
 	};
  
 void resume_netinit_thread() {
@@ -169,20 +170,15 @@ int fileBrowser_SMB_seekFile(fileBrowser_file* file, unsigned int where, unsigne
 	return fileBrowser_libfat_seekFile(file,where,type);
 }
 
-int fileBrowser_SMB_readFile(fileBrowser_file* file, void* buffer, unsigned int length){
-	return fileBrowser_libfatROM_readFile(file,buffer,length);
-}
-
 int fileBrowser_SMB_init(fileBrowser_file* file){
 	return 0;
 }
 
 int fileBrowser_SMB_deinit(fileBrowser_file* file) {
-  /*if(smb_initialized) {
+  if(smb_initialized) {
     smbClose("smb");
     smb_initialized = 0;
-  }*/
-	return fileBrowser_libfatROM_deinit(file);
+  }
 }
 
 #endif

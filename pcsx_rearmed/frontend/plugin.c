@@ -46,20 +46,7 @@ static long CALLBACK CDRgetTE(unsigned char _, unsigned char *__, unsigned char 
 static void CALLBACK GPUdisplayText(char *_) { return; }
 
 /* SPU */
-extern long CALLBACK SPUopen(void);
-extern long CALLBACK SPUinit(void);
-extern long CALLBACK SPUshutdown(void);
-extern long CALLBACK SPUclose(void);
-extern void CALLBACK SPUwriteRegister(unsigned long, unsigned short, unsigned int);
-extern unsigned short CALLBACK SPUreadRegister(unsigned long, unsigned int);
-extern void CALLBACK SPUwriteDMAMem(unsigned short *, int, unsigned int);
-extern void CALLBACK SPUreadDMAMem(unsigned short *, int, unsigned int);
-extern void CALLBACK SPUplayADPCMchannel(void *, unsigned int, int);
-extern void CALLBACK SPUregisterCallback(void (*cb)(void));
-extern void CALLBACK SPUregisterScheduleCb(void (*cb)(unsigned int));
-extern long CALLBACK SPUfreeze(unsigned int, void *, unsigned int);
-extern void CALLBACK SPUasync(unsigned int, unsigned int);
-extern int  CALLBACK SPUplayCDDAchannel(short *, int, unsigned int, int);
+#include "../plugins/dfsound/spu.h"
 
 /* PAD */
 static long CALLBACK PADinit(long _) { return 0; }
@@ -76,7 +63,7 @@ static long CALLBACK PADreadPort1(PadDataS *pad) {
 
 	pad->portMultitap = multitap1;
 
-	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON)
+	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON || in_type[pad_index] == PSE_PAD_TYPE_GUN)
 	{
 		pad->leftJoyX = in_analog_left[pad_index][0];
 		pad->leftJoyY = in_analog_left[pad_index][1];
@@ -104,7 +91,7 @@ static long CALLBACK PADreadPort2(PadDataS *pad) {
 
 	pad->portMultitap = multitap2;
 
-	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON)
+	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON || in_type[pad_index] == PSE_PAD_TYPE_GUN)
 	{
 		pad->leftJoyX = in_analog_left[pad_index][0];
 		pad->leftJoyY = in_analog_left[pad_index][1];
@@ -135,7 +122,7 @@ extern void GPUwriteDataMem(uint32_t *, int);
 extern uint32_t GPUreadStatus(void);
 extern uint32_t GPUreadData(void);
 extern void GPUreadDataMem(uint32_t *, int);
-extern long GPUdmaChain(uint32_t *,uint32_t);
+extern long GPUdmaChain(uint32_t *, uint32_t, uint32_t *, int32_t *);
 extern void GPUupdateLace(void);
 extern long GPUfreeze(uint32_t, void *);
 extern void GPUvBlank(int, int);
@@ -191,6 +178,7 @@ static const struct {
 	DIRECT_SPU(SPUregisterScheduleCb),
 	DIRECT_SPU(SPUasync),
 	DIRECT_SPU(SPUplayCDDAchannel),
+	DIRECT_SPU(SPUsetCDvol),
 	/* PAD */
 	DIRECT_PAD(PADinit),
 	DIRECT_PAD(PADshutdown),
@@ -231,8 +219,6 @@ static const struct {
 	DIRECT_GPU(GPUkeypressed),
 	DIRECT_GPU(GPUmakeSnapshot),
 	DIRECT_GPU(GPUconfigure),
-	DIRECT_GPU(GPUtest),
-	DIRECT_GPU(GPUabout),
 	DIRECT_GPU(GPUgetScreenPic),
 	DIRECT_GPU(GPUshowScreenPic),
 */
@@ -263,6 +249,9 @@ void plugin_call_rearmed_cbs(void)
 {
 	extern void *hGPUDriver;
 	void (*rearmed_set_cbs)(const struct rearmed_cbs *cbs);
+
+	pl_rearmed_cbs.screen_centering_type_default =
+		Config.hacks.gpu_centering ? C_INGAME : C_AUTO;
 
 	rearmed_set_cbs = SysLoadSym(hGPUDriver, "GPUrearmedCallbacks");
 	if (rearmed_set_cbs != NULL)

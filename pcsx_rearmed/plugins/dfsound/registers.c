@@ -132,7 +132,7 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
    {
     //-------------------------------------------------//
     case H_SPUaddr:
-      spu.spuAddr = (unsigned long) val<<3;
+      spu.spuAddr = (unsigned int)val << 3;
       //check_irq_io(spu.spuAddr);
       break;
     //-------------------------------------------------//
@@ -144,8 +144,9 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
       break;
     //-------------------------------------------------//
     case H_SPUctrl:
+      spu.spuStat = (spu.spuStat & ~0x3f) | (val & 0x3f);
+      spu.spuStat &= ~STAT_IRQ | val;
       if (!(spu.spuCtrl & CTRL_IRQ)) {
-        spu.spuStat&=~STAT_IRQ;
         if (val & CTRL_IRQ)
          schedule_next_irq();
       }
@@ -153,7 +154,7 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
       break;
     //-------------------------------------------------//
     case H_SPUstat:
-      spu.spuStat=val&0xf800;
+      //spu.spuStat=val&0xf800;
       break;
     //-------------------------------------------------//
     case H_SPUReverbAddr:
@@ -167,11 +168,11 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
       goto upd_irq;
     //-------------------------------------------------//
     case H_SPUrvolL:
-      spu.rvb->VolLeft=val;
+      spu.rvb->VolLeft = (int16_t)val;
       break;
     //-------------------------------------------------//
     case H_SPUrvolR:
-      spu.rvb->VolRight=val;
+      spu.rvb->VolRight = (int16_t)val;
       break;
     //-------------------------------------------------//
 
@@ -213,30 +214,44 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
 */
     //-------------------------------------------------//
     case H_SPUon1:
+      spu.last_keyon_cycles = cycles;
       do_samples_if_needed(cycles, 0, 2);
       SoundOn(0,16,val);
       break;
     //-------------------------------------------------//
     case H_SPUon2:
+      spu.last_keyon_cycles = cycles;
       do_samples_if_needed(cycles, 0, 2);
       SoundOn(16,24,val);
       break;
     //-------------------------------------------------//
     case H_SPUoff1:
+      if (cycles - spu.last_keyon_cycles < 786u) {
+       if (val & regAreaGet(H_SPUon1))
+        log_unhandled("koff1 %04x %d\n", val, cycles - spu.last_keyon_cycles);
+       val &= ~regAreaGet(H_SPUon1);
+      }
+      do_samples_if_needed(cycles, 0, 2);
       SoundOff(0,16,val);
       break;
     //-------------------------------------------------//
     case H_SPUoff2:
+      if (cycles - spu.last_keyon_cycles < 786u) {
+       if (val & regAreaGet(H_SPUon1))
+        log_unhandled("koff2 %04x %d\n", val, cycles - spu.last_keyon_cycles);
+       val &= ~regAreaGet(H_SPUon2);
+      }
+      do_samples_if_needed(cycles, 0, 2);
       SoundOff(16,24,val);
       break;
     //-------------------------------------------------//
     case H_CDLeft:
       spu.iLeftXAVol=(int16_t)val;
-      if(spu.cddavCallback) spu.cddavCallback(0,(int16_t)val);
+      //if(spu.cddavCallback) spu.cddavCallback(0,(int16_t)val);
       break;
     case H_CDRight:
       spu.iRightXAVol=(int16_t)val;
-      if(spu.cddavCallback) spu.cddavCallback(1,(int16_t)val);
+      //if(spu.cddavCallback) spu.cddavCallback(1,(int16_t)val);
       break;
     //-------------------------------------------------//
     case H_FMod1:
@@ -351,7 +366,7 @@ unsigned short CALLBACK SPUreadRegister(unsigned long reg, unsigned int cycles)
      return spu.spuCtrl;
 
     case H_SPUstat:
-     return (spu.spuStat & ~0x3F) | (spu.spuCtrl & 0x3F);
+     return spu.spuStat;
         
     case H_SPUaddr:
      return (unsigned short)(spu.spuAddr>>3);
@@ -420,7 +435,7 @@ static void SoundOn(int start,int end,unsigned short val)
 static void SoundOff(int start,int end,unsigned short val)
 {
  int ch;
- for(ch=start;ch<end;ch++,val>>=1)                     // loop channels
+ for (ch = start; val && ch < end; ch++, val >>= 1)    // loop channels
   {
    if(val&1)
     {
@@ -563,3 +578,5 @@ static void ReverbOn(int start,int end,unsigned short val)
    spu.s_chan[ch].bReverb=val&1;                       // -> reverb on/off
   }
 }
+
+// vim:shiftwidth=1:expandtab

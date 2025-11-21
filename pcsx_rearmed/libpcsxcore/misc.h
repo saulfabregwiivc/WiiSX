@@ -55,11 +55,12 @@ typedef struct {
 
 extern char CdromId[10];
 extern char CdromLabel[33];
+extern int  CdromFrontendId; // for frontend use
 
-void BiosBootBypass();
+int BiosBootBypass();
 
 int LoadCdrom();
-int LoadCdromFile(const char *filename, EXE_HEADER *head);
+int LoadCdromFile(const char *filename, EXE_HEADER *head, u8 *time_bcd_out);
 int CheckCdrom();
 int Load(const char *ExePath);
 

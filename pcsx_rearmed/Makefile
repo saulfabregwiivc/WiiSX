@@ -12,6 +12,9 @@ else
 CFLAGS += -O2 -DNDEBUG
 endif
 endif
+ifeq ($(DEBUG_ASAN), 1)
+CFLAGS += -fsanitize=address
+endif
 CFLAGS += -DP_HAVE_MMAP=$(if $(NO_MMAP),0,1) \
 	  -DP_HAVE_PTHREAD=$(if $(NO_PTHREAD),0,1) \
 	  -DP_HAVE_POSIX_MEMALIGN=$(if $(NO_POSIX_MEMALIGN),0,1) \
@@ -45,6 +48,9 @@ endif
 CC_LINK ?= $(CC)
 CC_AS ?= $(CC)
 LDFLAGS += $(MAIN_LDFLAGS)
+ifeq ($(DEBUG_ASAN), 1)
+LDFLAGS += -static-libasan
+endif
 EXTRA_LDFLAGS ?= -Wl,-Map=$@.map
 LDLIBS += $(MAIN_LDLIBS)
 ifdef PCNT
@@ -56,7 +62,8 @@ OBJS += libpcsxcore/cdriso.o libpcsxcore/cdrom.o libpcsxcore/cheat.o libpcsxcore
 	libpcsxcore/decode_xa.o libpcsxcore/mdec.o \
 	libpcsxcore/misc.o libpcsxcore/plugins.o libpcsxcore/ppf.o libpcsxcore/psxbios.o \
 	libpcsxcore/psxcommon.o libpcsxcore/psxcounters.o libpcsxcore/psxdma.o \
-	libpcsxcore/psxhw.o libpcsxcore/psxinterpreter.o libpcsxcore/psxmem.o libpcsxcore/r3000a.o \
+	libpcsxcore/psxhw.o libpcsxcore/psxinterpreter.o libpcsxcore/psxmem.o \
+	libpcsxcore/psxevents.o libpcsxcore/r3000a.o \
 	libpcsxcore/sio.o libpcsxcore/spu.o libpcsxcore/gpu.o
 OBJS += libpcsxcore/gte.o libpcsxcore/gte_nf.o libpcsxcore/gte_divider.o
 
@@ -152,7 +159,7 @@ OBJS += libpcsxcore/new_dynarec/pcsxmem.o
 else
 CFLAGS += -DDRC_DISABLE
 endif
-OBJS += libpcsxcore/new_dynarec/emu_if.o libpcsxcore/new_dynarec/events.o
+OBJS += libpcsxcore/new_dynarec/emu_if.o
 libpcsxcore/new_dynarec/new_dynarec.o: libpcsxcore/new_dynarec/pcsxmem_inline.c
 ifdef DRC_DBG
 libpcsxcore/new_dynarec/emu_if.o: CFLAGS += -D_FILE_OFFSET_BITS=64
@@ -172,7 +179,7 @@ ifeq "$(ARCH)" "arm"
 OBJS += plugins/dfsound/arm_utils.o
 endif
 ifeq "$(HAVE_C64_TOOLS)" "1"
-plugins/dfsound/spu.o: CFLAGS += -DC64X_DSP
+plugins/dfsound/%.o: CFLAGS += -DC64X_DSP -DWANT_THREAD_CODE
 plugins/dfsound/spu.o: plugins/dfsound/spu_c64x.c
 frontend/menu.o: CFLAGS += -DC64X_DSP
 endif
@@ -306,6 +313,8 @@ frontend/main.o frontend/menu.o: CFLAGS += -include frontend/pandora/ui_feat.h
 frontend/libpicofe/linux/plat.o: CFLAGS += -DPANDORA
 USE_PLUGIN_LIB = 1
 USE_FRONTEND = 1
+CFLAGS += -gdwarf-3 -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
 endif
 ifeq "$(PLATFORM)" "caanoo"
 OBJS += frontend/libpicofe/gp2x/in_gp2x.o frontend/warm/warm.o
@@ -410,7 +419,7 @@ $(TARGET): $(OBJS)
 ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJS)
 else
-	$(CC_LINK) -o $@ $^ $(LDFLAGS) $(LDLIBS) $(EXTRA_LDFLAGS)
+	$(CC_LINK) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS) $(EXTRA_LDFLAGS)
 endif
 
 clean: $(PLAT_CLEAN) clean_plugins
@@ -420,10 +429,10 @@ ifneq ($(PLUGINS),)
 plugins_: $(PLUGINS)
 
 $(PLUGINS):
-	make -C $(dir $@)
+	$(MAKE) -C $(dir $@)
 
 clean_plugins:
-	make -C plugins/gpulib/ clean
+	$(MAKE) -C plugins/gpulib/ clean
 	for dir in $(PLUGINS) ; do \
 		$(MAKE) -C $$(dirname $$dir) clean; done
 else

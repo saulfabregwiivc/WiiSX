@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 #include <assert.h>
 
@@ -23,6 +24,7 @@
 #include "vector_ops.h"
 #endif
 #include "psx_gpu_simd.h"
+#include "psx_gpu_offsets.h"
 
 #if 0
 void dump_r_d(const char *name, void *dump);
@@ -4192,10 +4194,10 @@ render_block_handler_struct render_sprite_block_handlers[] =
 
 
 void render_sprite(psx_gpu_struct *psx_gpu, s32 x, s32 y, u32 u, u32 v,
- s32 width, s32 height, u32 flags, u32 color)
+ s32 *width, s32 *height, u32 flags, u32 color)
 {
-  s32 x_right = x + width - 1;
-  s32 y_bottom = y + height - 1;
+  s32 x_right = x + *width - 1;
+  s32 y_bottom = y + *height - 1;
 
 #ifdef PROFILE
   sprites++;
@@ -4204,6 +4206,7 @@ void render_sprite(psx_gpu_struct *psx_gpu, s32 x, s32 y, u32 u, u32 v,
   if(invalidate_texture_cache_region_viewport(psx_gpu, x, y, x_right,
    y_bottom) == 0)
   {
+    *width = *height = 0;
     return;
   }
 
@@ -4212,7 +4215,7 @@ void render_sprite(psx_gpu_struct *psx_gpu, s32 x, s32 y, u32 u, u32 v,
     u32 clip = psx_gpu->viewport_start_x - x;
     x += clip;
     u += clip;
-    width -= clip;
+    *width -= clip;
   }
 
   if(y < psx_gpu->viewport_start_y)
@@ -4220,21 +4223,24 @@ void render_sprite(psx_gpu_struct *psx_gpu, s32 x, s32 y, u32 u, u32 v,
     s32 clip = psx_gpu->viewport_start_y - y;
     y += clip;
     v += clip;
-    height -= clip;
+    *height -= clip;
   }
 
   if(x_right > psx_gpu->viewport_end_x)
-    width -= x_right - psx_gpu->viewport_end_x;
+    *width -= x_right - psx_gpu->viewport_end_x;
 
   if(y_bottom > psx_gpu->viewport_end_y)
-    height -= y_bottom - psx_gpu->viewport_end_y;
+    *height -= y_bottom - psx_gpu->viewport_end_y;
 
-  if((width <= 0) || (height <= 0))
+  if((*width <= 0) || (*height <= 0))
+  {
+    *width = *height = 0;
     return;
+  }
 
 #ifdef PROFILE
-  span_pixels += width * height;
-  spans += height;
+  span_pixels += *width * *height;
+  spans += *height;
 #endif
 
   u32 render_state = flags &
@@ -4271,7 +4277,7 @@ void render_sprite(psx_gpu_struct *psx_gpu, s32 x, s32 y, u32 u, u32 v,
   psx_gpu->render_block_handler = render_block_handler;
 
   ((setup_sprite_function_type *)render_block_handler->setup_blocks)
-   (psx_gpu, x, y, u, v, width, height, color);
+   (psx_gpu, x, y, u, v, *width, *height, color);
 }
 
 #define draw_pixel_line_mask_evaluate_yes()                                    \
@@ -4582,6 +4588,7 @@ void render_line(psx_gpu_struct *psx_gpu, vertex_struct *vertexes, u32 flags,
   if(vertex_a->x >= vertex_b->x)
   {
     vertex_swap(vertex_a, vertex_b);
+    (void)triangle_winding;
   }
 
   x_a = vertex_a->x;
@@ -5011,6 +5018,9 @@ void initialize_psx_gpu(psx_gpu_struct *psx_gpu, u16 *vram)
   psx_gpu->primitive_type = PRIMITIVE_TYPE_UNKNOWN;
 
   psx_gpu->saved_hres = 256;
+
+  // check some offset
+  psx_gpu->reserved_a[(offsetof(psx_gpu_struct, blocks) == psx_gpu_blocks_offset) - 1] = 0;
 }
 
 u64 get_us(void)

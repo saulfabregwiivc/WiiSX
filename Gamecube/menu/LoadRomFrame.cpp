@@ -32,6 +32,7 @@ extern "C" {
 #include "../fileBrowser/fileBrowser-libfat.h"
 #include "../fileBrowser/fileBrowser-SMB.h"
 #include "../fileBrowser/fileBrowser-CARD.h"
+void LoadingBar_showBar(float percent, const char* string);
 }
 
 void Func_LoadFromSD();
@@ -40,21 +41,31 @@ void Func_LoadFromUSB();
 void Func_LoadFromSamba();
 void Func_ReturnFromLoadRomFrame();
 
+#ifdef HW_RVL
 #define NUM_FRAME_BUTTONS 4
+#else
+#define NUM_FRAME_BUTTONS 2
+#endif
 #define FRAME_BUTTONS loadRomFrameButtons
 #define FRAME_STRINGS loadRomFrameStrings
 
-static char FRAME_STRINGS[4][25] =
+#ifdef HW_RVL
+static const char FRAME_STRINGS[4][25] =
 	{ "Load from SD",
 	  "Load from DVD",
 	  "Load from USB",
 	  "Load from Samba"};
+#else
+static const char FRAME_STRINGS[2][25] =
+	{ "Load from FAT",
+	  "Load from DVD"};
+#endif
 
-struct ButtonInfo
+struct ButtonInfoWithHint
 {
 	menu::Button	*button;
 	int				buttonStyle;
-	char*			buttonString;
+	const char*		buttonString;
 	float			x;
 	float			y;
 	float			width;
@@ -65,12 +76,18 @@ struct ButtonInfo
 	int				focusRight;
 	ButtonFunc		clickedFunc;
 	ButtonFunc		returnFunc;
+	const char*		buttonHint;
 } FRAME_BUTTONS[NUM_FRAME_BUTTONS] =
 { //	button	buttonStyle	buttonString		x		y		width	height	Up	Dwn	Lft	Rt	clickFunc			returnFunc
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[0],	150.0,	100.0,	340.0,	56.0,	 3,	 1,	-1,	-1,	Func_LoadFromSD,	Func_ReturnFromLoadRomFrame }, // Load From SD
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[1],	150.0,	180.0,	340.0,	56.0,	 0,	 2,	-1,	-1,	Func_LoadFromDVD,	Func_ReturnFromLoadRomFrame }, // Load From DVD
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	150.0,	260.0,	340.0,	56.0,	 1,	 3,	-1,	-1,	Func_LoadFromUSB,	Func_ReturnFromLoadRomFrame }, // Load From USB
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[3],	150.0,	340.0,	340.0,	56.0,	 2,	 0,	-1,	-1,	Func_LoadFromSamba,	Func_ReturnFromLoadRomFrame }, // Load From Samba
+#ifdef HW_RVL
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[0],	150.0,	100.0,	340.0,	56.0,	 3,	 1,	-1,	-1,	Func_LoadFromSD,	Func_ReturnFromLoadRomFrame, "Front SD, Slot A, Slot B are supported (in that order)\nFAT32 only" },
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[1],	150.0,	180.0,	340.0,	56.0,	 0,	 2,	-1,	-1,	Func_LoadFromDVD,	Func_ReturnFromLoadRomFrame, "Requires a compatible disc drive/console\nISO9660 discs only" }, // Load From DVD
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	150.0,	260.0,	340.0,	56.0,	 1,	 3,	-1,	-1,	Func_LoadFromUSB,	Func_ReturnFromLoadRomFrame, "USB Storage must be FAT32 formatted" }, // Load From USB
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[3],	150.0,	340.0,	340.0,	56.0,	 2,	 0,	-1,	-1,	Func_LoadFromSamba,	Func_ReturnFromLoadRomFrame, "Requires setup in settings.cfg" }, // Load From Samba
+#else
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[0],	150.0,	180.0,	340.0,	56.0,	 1,	 1,	-1,	-1,	Func_LoadFromSD,	Func_ReturnFromLoadRomFrame, "M2Loader, GCLoader, SD2SP2, SlotA/B are supported (in that order)\nFAT32 only" },
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[1],	150.0,	260.0,	340.0,	56.0,	 0,	 0,	-1,	-1,	Func_LoadFromDVD,	Func_ReturnFromLoadRomFrame, "Requires a compatible disc drive/console\nISO9660 discs only" } // Load From DVD
+#endif
 };
 
 LoadRomFrame::LoadRomFrame()
@@ -78,7 +95,7 @@ LoadRomFrame::LoadRomFrame()
 	for (int i = 0; i < NUM_FRAME_BUTTONS; i++)
 		FRAME_BUTTONS[i].button = new menu::Button(FRAME_BUTTONS[i].buttonStyle, &FRAME_BUTTONS[i].buttonString, 
 										FRAME_BUTTONS[i].x, FRAME_BUTTONS[i].y, 
-										FRAME_BUTTONS[i].width, FRAME_BUTTONS[i].height);
+										FRAME_BUTTONS[i].width, FRAME_BUTTONS[i].height, &FRAME_BUTTONS[i].buttonHint);
 
 	for (int i = 0; i < NUM_FRAME_BUTTONS; i++)
 	{
@@ -123,13 +140,13 @@ extern void fileBrowserFrame_OpenDirectory(fileBrowser_file* dir);
 
 void Func_LoadFromSD()
 {
+	LoadingBar_showBar(1.0f, "Reading directory ...");
 	// Deinit any existing romFile state
 	if(isoFile_deinit) isoFile_deinit( &isoFile );
 	// Change all the romFile pointers
 	isoFile_topLevel = &topLevel_libfat_Default;
 	isoFile_readDir  = fileBrowser_libfat_readDir;
 	isoFile_open     = fileBrowser_libfat_open;
-	isoFile_readFile = fileBrowser_libfatROM_readFile;
 	isoFile_seekFile = fileBrowser_libfat_seekFile;
 	isoFile_init     = fileBrowser_libfat_init;
 	isoFile_deinit   = fileBrowser_libfatROM_deinit;
@@ -150,13 +167,13 @@ void Func_LoadFromSD()
 
 void Func_LoadFromDVD()
 {
+	LoadingBar_showBar(1.0f, "Reading directory ...");
 	// Deinit any existing romFile state
 	if(isoFile_deinit) isoFile_deinit( &isoFile );
 	// Change all the romFile pointers
 	isoFile_topLevel = &topLevel_DVD;
 	isoFile_readDir  = fileBrowser_libfat_readDir;
 	isoFile_open     = fileBrowser_libfat_open;
-	isoFile_readFile = fileBrowser_libfat_readFile;
 	isoFile_seekFile = fileBrowser_libfat_seekFile;
 	isoFile_init     = fileBrowser_libfat_init;
 	isoFile_deinit   = fileBrowser_libfat_deinit;
@@ -167,16 +184,16 @@ void Func_LoadFromDVD()
 	fileBrowserFrame_OpenDirectory(isoFile_topLevel);
 }
 
+#ifdef WII
 void Func_LoadFromUSB()
 {
-#ifdef WII
+	LoadingBar_showBar(1.0f, "Reading directory ...");
 	// Deinit any existing romFile state
 	if(isoFile_deinit) isoFile_deinit( &isoFile );
 	// Change all the romFile pointers
 	isoFile_topLevel = &topLevel_libfat_USB;
 	isoFile_readDir  = fileBrowser_libfat_readDir;
 	isoFile_open     = fileBrowser_libfat_open;
-	isoFile_readFile = fileBrowser_libfatROM_readFile;
 	isoFile_seekFile = fileBrowser_libfat_seekFile;
 	isoFile_init     = fileBrowser_libfat_init;
 	isoFile_deinit   = fileBrowser_libfatROM_deinit;
@@ -191,23 +208,24 @@ void Func_LoadFromUSB()
 	else
 	{
 		pMenuContext->setActiveFrame(MenuContext::FRAME_FILEBROWSER,loadRomMode);
-		fileBrowserFrame_OpenDirectory(isoFile_topLevel);
+	  fileBrowserFrame_OpenDirectory(isoFile_topLevel);
 	}
 #else
 	menu::MessageBox::getInstance().setMessage("Available only for Wii");
 #endif
 }
+#endif
 
+#ifdef HW_RVL
 void Func_LoadFromSamba()
 {
-#ifdef HW_RVL
+	LoadingBar_showBar(1.0f, "Reading directory ...");
 	// Deinit any existing romFile state
 	if(isoFile_deinit) isoFile_deinit( &isoFile );
 	// Change all the romFile pointers
 	isoFile_topLevel = &topLevel_SMB;
 	isoFile_readDir  = fileBrowser_SMB_readDir;
 	isoFile_open     = fileBrowser_SMB_open;
-	isoFile_readFile = fileBrowser_SMB_readFile;
 	isoFile_seekFile = fileBrowser_SMB_seekFile;
 	isoFile_init     = fileBrowser_SMB_init;
 	isoFile_deinit   = fileBrowser_SMB_deinit;
@@ -216,10 +234,8 @@ void Func_LoadFromSamba()
 	
 	pMenuContext->setActiveFrame(MenuContext::FRAME_FILEBROWSER,loadRomMode);
 	fileBrowserFrame_OpenDirectory(isoFile_topLevel);
-#else
-	menu::MessageBox::getInstance().setMessage("Available only for Wii");
-#endif
 }
+#endif
 
 void Func_ReturnFromLoadRomFrame()
 {

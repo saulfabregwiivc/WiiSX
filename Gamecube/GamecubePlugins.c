@@ -44,7 +44,7 @@ void GPUwriteDataMem(unsigned long *, int);
 unsigned long GPUreadStatus(void);
 unsigned long GPUreadData(void);
 void GPUreadDataMem(unsigned long *, int);
-long GPUdmaChain(unsigned long *,unsigned long, unsigned long *);
+long GPUdmaChain(unsigned long *,unsigned long, unsigned long *, unsigned long *);
 void GPUupdateLace(void);
 void GPUdisplayText(char *);
 long GPUfreeze(unsigned long,void *);
@@ -77,11 +77,14 @@ void CALLBACK SPUregisterCDDAVolume(void (CALLBACK *CDDAVcallback)(short, short)
 void CALLBACK SPUregisterScheduleCb(void (CALLBACK *callback)(unsigned int));
 void CALLBACK SPUwriteDMAMem(unsigned short *pusPSXMem, int iSize, unsigned int cycles);
 void CALLBACK SPUreadDMAMem(unsigned short *pusPSXMem, int iSize, unsigned int cycles);
-unsigned short CALLBACK SPUreadRegister(unsigned long reg);
+unsigned short CALLBACK SPUreadRegister(unsigned long reg, unsigned int cycles);
 void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val, unsigned int cycles);
 long CALLBACK SPUopen(void);
 long CALLBACK SPUclose(void);
 long CALLBACK SPUfreeze(uint32_t ulFreezeMode, void * pF, uint32_t cycles);
+void CALLBACK SPUsetCDvol(unsigned char ll, unsigned char lr,
+			  unsigned char rl, unsigned char rr, unsigned int cycle);
+
 
 #define EMPTY_PLUGIN \
 	{ NULL,      \
@@ -150,6 +153,8 @@ long CALLBACK SPUfreeze(uint32_t ulFreezeMode, void * pF, uint32_t cycles);
 	      (void*)SPUplayADPCMchannel}, \
 	    { "SPUfreeze", \
 	      (void*)SPUfreeze}, \
+	    { "SPUsetCDvol", \
+	      (void*)SPUsetCDvol}, \
 	    { "SPUregisterCallback", \
 	      (void*)SPUregisterCallback}, \
 	    { "SPUregisterCDDAVolume", \

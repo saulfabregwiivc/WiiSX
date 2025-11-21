@@ -116,12 +116,17 @@ extern u8 **psxMemWLUT;
 extern u8 **psxMemRLUT;
 extern int cache_isolated;
 
+#ifndef DISABLE_MEM_LUTS
+#define DISABLE_MEM_LUTS 0
+#endif
+
 static inline void * psxm_lut(u32 mem, int write, u8 **lut)
 {
 	if (!DISABLE_MEM_LUTS) {
 		void *ptr = lut[mem >> 16];
 
-		return ptr == INVALID_PTR ? INVALID_PTR : ptr + (u16)mem;
+		return ptr == INVALID_PTR ? INVALID_PTR
+			: (void *)((uintptr_t)ptr + (u16)mem);
 	}
 
 	if (mem >= 0xa0000000)
@@ -173,8 +178,8 @@ void psxMemShutdown();
 u8 psxMemRead8 (u32 mem);
 u16 psxMemRead16(u32 mem);
 u32 psxMemRead32(u32 mem);
-void psxMemWrite8 (u32 mem, u8 value);
-void psxMemWrite16(u32 mem, u16 value);
+void psxMemWrite8 (u32 mem, u32 value);
+void psxMemWrite16(u32 mem, u32 value);
 void psxMemWrite32(u32 mem, u32 value);
 void *psxMemPointer(u32 mem);
 

@@ -869,12 +869,12 @@ OP(psxLWR) { doLWR(regs_, _Rt_, _oB_); }
 OP(psxLWLe) { if (checkLD(regs_, _oB_ & ~3, 0)) doLWL(regs_, _Rt_, _oB_); }
 OP(psxLWRe) { if (checkLD(regs_, _oB_     , 0)) doLWR(regs_, _Rt_, _oB_); }
 
-OP(psxSB) { psxMemWrite8 (_oB_, _rRt_ &   0xff); }
-OP(psxSH) { psxMemWrite16(_oB_, _rRt_ & 0xffff); }
+OP(psxSB) { psxMemWrite8 (_oB_, _rRt_); }
+OP(psxSH) { psxMemWrite16(_oB_, _rRt_); }
 OP(psxSW) { psxMemWrite32(_oB_, _rRt_); }
 
-OP(psxSBe) { if (checkST(regs_, _oB_, 0)) psxMemWrite8 (_oB_, _rRt_ &   0xff); }
-OP(psxSHe) { if (checkST(regs_, _oB_, 1)) psxMemWrite16(_oB_, _rRt_ & 0xffff); }
+OP(psxSBe) { if (checkST(regs_, _oB_, 0)) psxMemWrite8 (_oB_, _rRt_); }
+OP(psxSHe) { if (checkST(regs_, _oB_, 1)) psxMemWrite16(_oB_, _rRt_); }
 OP(psxSWe) { if (checkST(regs_, _oB_, 3)) psxMemWrite32(_oB_, _rRt_); }
 
 static void doSWL(psxRegisters *regs, u32 rt, u32 addr) {
@@ -958,8 +958,14 @@ void MTC0(psxRegisters *regs_, int reg, u32 val) {
 		case 7:
 			if ((regs_->CP0.n.DCIC ^ val) & 0xff800000)
 				log_unhandled("DCIC: %08x->%08x\n", regs_->CP0.n.DCIC, val);
-			// fallthrough
+			goto default_;
+		case 3:
+			if (regs_->CP0.n.BPC != val)
+				log_unhandled("BPC: %08x->%08x\n", regs_->CP0.n.BPC, val);
+			goto default_;
+
 		default:
+		default_:
 			regs_->CP0.r[reg] = val;
 			break;
 	}

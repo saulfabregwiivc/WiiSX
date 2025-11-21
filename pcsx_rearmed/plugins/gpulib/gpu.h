@@ -91,7 +91,8 @@ struct psx_gpu {
     } last_list;
     uint32_t last_vram_read_frame;
     uint32_t w_out_old, h_out_old, status_vo_old;
-    int screen_centering_type; // 0 - auto, 1 - game conrolled, 2 - manual
+    short screen_centering_type;
+    short screen_centering_type_default;
     int screen_centering_x;
     int screen_centering_y;
   } state;
@@ -121,7 +122,8 @@ extern struct psx_gpu gpu;
 
 extern const unsigned char cmd_lengths[256];
 
-int do_cmd_list(uint32_t *list, int count, int *last_cmd);
+int do_cmd_list(uint32_t *list, int count,
+	int *cycles_sum, int *cycles_last, int *last_cmd);
 
 struct rearmed_cbs;
 
@@ -135,7 +137,7 @@ void renderer_set_config(const struct rearmed_cbs *config);
 void renderer_notify_res_change(void);
 void renderer_notify_update_lace(int updated);
 void renderer_sync(void);
-void renderer_notify_scanout_x_change(int x, int w);
+void renderer_notify_scanout_change(int x, int y);
 
 int  vout_init(void);
 int  vout_finish(void);
@@ -149,7 +151,8 @@ struct GPUFreeze;
 long GPUinit(void);
 long GPUshutdown(void);
 void GPUwriteDataMem(uint32_t *mem, int count);
-long GPUdmaChain(uint32_t *rambase, uint32_t addr, uint32_t *progress_addr);
+long GPUdmaChain(uint32_t *rambase, uint32_t addr,
+		uint32_t *progress_addr, int32_t *cycles_last_cmd);
 void GPUwriteData(uint32_t data);
 void GPUreadDataMem(uint32_t *mem, int count);
 uint32_t GPUreadData(void);

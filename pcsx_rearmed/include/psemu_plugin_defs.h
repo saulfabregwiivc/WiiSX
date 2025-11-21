@@ -228,13 +228,17 @@ typedef struct
 		unsigned char padMode; // 0 : digital 1: analog
 		unsigned char cmd4dConfig[6];
 		unsigned int  lastUseFrame;
-		unsigned int  digitalModeFrames;
+		unsigned int  unused;
+		unsigned char configModeUsed;
+		unsigned char autoAnalogTried;
+		unsigned char userToggled;
+		unsigned char padding;
 	} ds;
 	unsigned char multitapLongModeEnabled;
 	unsigned char padding2;
 	unsigned char txData[34];
 
-	unsigned char reserved[26];
+	unsigned char reserved[22];
 } PadDataS;
 
 /*         NET PlugIn v2       */

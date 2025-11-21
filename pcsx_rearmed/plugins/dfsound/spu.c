@@ -27,6 +27,7 @@
 #include "registers.h"
 #include "out.h"
 #include "spu_config.h"
+#include "spu.h"
 
 #ifdef __arm__
 #include "arm_features.h"
@@ -198,12 +199,15 @@ static void InterpolateDown(sample_buf *sb, int sinc)
 #include "gauss_i.h"
 #include "xa.c"
 
-static void do_irq(void)
+static void do_irq(int cycles_after)
 {
- //if(!(spu.spuStat & STAT_IRQ))
+ if (spu.spuStat & STAT_IRQ)
+  log_unhandled("spu: missed irq?\n");
+ else
  {
   spu.spuStat |= STAT_IRQ;                             // asserted status?
-  if(spu.irqCallback) spu.irqCallback();
+  if (spu.irqCallback)
+   spu.irqCallback(cycles_after);
  }
 }
 
@@ -211,8 +215,8 @@ static int check_irq(int ch, unsigned char *pos)
 {
  if((spu.spuCtrl & (CTRL_ON|CTRL_IRQ)) == (CTRL_ON|CTRL_IRQ) && pos == spu.pSpuIrq)
  {
-  //printf("ch%d irq %04x\n", ch, pos - spu.spuMemC);
-  do_irq();
+  //printf("ch%d irq %04zx\n", ch, pos - spu.spuMemC);
+  do_irq(0);
   return 1;
  }
  return 0;
@@ -225,7 +229,15 @@ void check_irq_io(unsigned int addr)
  if((spu.spuCtrl & (CTRL_ON|CTRL_IRQ)) == (CTRL_ON|CTRL_IRQ) && addr == irq_addr)
  {
   //printf("io   irq %04x\n", irq_addr);
-  do_irq();
+  do_irq(0);
+ }
+}
+
+void do_irq_io(int cycles_after)
+{
+ if ((spu.spuCtrl & (CTRL_ON|CTRL_IRQ)) == (CTRL_ON|CTRL_IRQ))
+ {
+  do_irq(cycles_after);
  }
 }
 
@@ -816,13 +828,15 @@ static void do_channels(int ns_to)
 
    if (s_chan->bFMod == 2)                         // fmod freq channel
     memcpy(iFMod, &ChanBuf, ns_to * sizeof(iFMod[0]));
-   if (s_chan->bRVBActive && do_rvb)
+   if (!(spu.spuCtrl & CTRL_MUTE))
+    ;
+   else if (s_chan->bRVBActive && do_rvb)
     mix_chan_rvb(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume, RVB);
    else
     mix_chan(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume);
   }
 
-  MixXA(spu.SSumLR, RVB, ns_to, spu.decode_pos);
+  MixCD(spu.SSumLR, RVB, ns_to, spu.decode_pos);
 
   if (spu.rvb->StartAddr) {
    if (do_rvb)
@@ -1099,7 +1113,7 @@ static void sync_worker_thread(int force)
   work = &worker->i[worker->i_reaped & WORK_I_MASK];
   thread_work_wait_sync(work, force);
 
-  MixXA(work->SSumLR, RVB, work->ns_to, work->decode_pos);
+  MixCD(work->SSumLR, RVB, work->ns_to, work->decode_pos);
   do_samples_finish(work->SSumLR, work->ns_to,
    work->channels_silent, work->decode_pos);
 
@@ -1134,7 +1148,7 @@ void do_samples(unsigned int cycles_to, int do_direct)
  cycle_diff = cycles_to - spu.cycles_played;
  if (cycle_diff < -2*1048576 || cycle_diff > 2*1048576)
   {
-   //xprintf("desync %u %d\n", cycles_to, cycle_diff);
+   log_unhandled("desync %u %d\n", cycles_to, cycle_diff);
    spu.cycles_played = cycles_to;
    return;
   }
@@ -1151,7 +1165,7 @@ void do_samples(unsigned int cycles_to, int do_direct)
  ns_to = (cycle_diff / 768 + 1) & ~1;
  if (ns_to > NSSIZE) {
   // should never happen
-  //xprintf("ns_to oflow %d %d\n", ns_to, NSSIZE);
+  log_unhandled("ns_to oflow %d %d\n", ns_to, NSSIZE);
   ns_to = NSSIZE;
  }
 
@@ -1180,7 +1194,7 @@ void do_samples(unsigned int cycles_to, int do_direct)
     if (0 < left && left <= ns_to)
      {
       //xprintf("decoder irq %x\n", spu.decode_pos);
-      do_irq();
+      do_irq(0);
      }
    }
   if (!spu.cycles_dma_end || (int)(spu.cycles_dma_end - cycles_to) < 0) {
@@ -1237,7 +1251,7 @@ static void do_samples_finish(int *SSumLR, int ns_to,
   vol_l = vol_l * spu_config.iVolume >> 10;
   vol_r = vol_r * spu_config.iVolume >> 10;
 
-  if (!(spu.spuCtrl & CTRL_MUTE) || !(vol_l | vol_r))
+  if (!(vol_l | vol_r))
    {
     // muted? (rare)
     memset(spu.pS, 0, ns_to * 2 * sizeof(spu.pS[0]));
@@ -1344,6 +1358,8 @@ void CALLBACK SPUplayADPCMchannel(xa_decode_t *xap, unsigned int cycle, int is_s
  if(!xap->freq) return;                // no xa freq ? bye
 
  if (is_start)
+  spu.XAPlay = spu.XAFeed = spu.XAStart;
+ if (spu.XAPlay == spu.XAFeed)
   do_samples(cycle, 1);                // catch up to prevent source underflows later
 
  FeedXA(xap);                          // call main XA feeder
@@ -1351,16 +1367,27 @@ void CALLBACK SPUplayADPCMchannel(xa_decode_t *xap, unsigned int cycle, int is_s
 }
 
 // CDDA AUDIO
-int CALLBACK SPUplayCDDAchannel(short *pcm, int nbytes, unsigned int cycle, int is_start)
+int CALLBACK SPUplayCDDAchannel(short *pcm, int nbytes, unsigned int cycle, int unused)
 {
  if (!pcm)      return -1;
  if (nbytes<=0) return -1;
 
- if (is_start)
+ if (spu.CDDAPlay == spu.CDDAFeed)
   do_samples(cycle, 1);                // catch up to prevent source underflows later
 
  FeedCDDA((unsigned char *)pcm, nbytes);
  return 0;
+}
+
+void CALLBACK SPUsetCDvol(unsigned char ll, unsigned char lr,
+  unsigned char rl, unsigned char rr, unsigned int cycle)
+{
+ if (spu.XAPlay != spu.XAFeed || spu.CDDAPlay != spu.CDDAFeed)
+  do_samples(cycle, 1);
+ spu.cdv.ll = ll;
+ spu.cdv.lr = lr;
+ spu.cdv.rl = rl;
+ spu.cdv.rr = rr;
 }
 
 // to be called after state load
@@ -1463,6 +1490,8 @@ static void init_spu_thread(void)
 {
  int ret;
 
+ spu.sb_thread = spu.sb_thread_;
+
  if (sysconf(_SC_NPROCESSORS_ONLN) <= 1)
   return;
 
@@ -1524,7 +1553,10 @@ long CALLBACK SPUinit(void)
  int i;
 
  memset(&spu, 0, sizeof(spu));
- spu.spuMemC = calloc(1, 512 * 1024);
+ spu.spuMemC = calloc(1, 512 * 1024 + 16);
+ // a guard for runaway channels - End+Mute
+ spu.spuMemC[512 * 1024 + 1] = 1;
+
  InitADSR();
 
  spu.s_chan = calloc(MAXCHAN+1, sizeof(spu.s_chan[0])); // channel + 1 infos (1 is security for fmod handling)
@@ -1602,14 +1634,14 @@ long CALLBACK SPUshutdown(void)
 // SETUP CALLBACKS
 // this functions will be called once, 
 // passes a callback that should be called on SPU-IRQ/cdda volume change
-void CALLBACK SPUregisterCallback(void (CALLBACK *callback)(void))
+void CALLBACK SPUregisterCallback(void (CALLBACK *callback)(int))
 {
  spu.irqCallback = callback;
 }
 
 void CALLBACK SPUregisterCDDAVolume(void (CALLBACK *CDDAVcallback)(short, short))
 {
- spu.cddavCallback = CDDAVcallback;
+ //spu.cddavCallback = CDDAVcallback;
 }
 
 void CALLBACK SPUregisterScheduleCb(void (CALLBACK *callback)(unsigned int))

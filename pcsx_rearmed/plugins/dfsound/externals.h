@@ -89,17 +89,6 @@ typedef struct
               
 ///////////////////////////////////////////////////////////
 
-// Tmp Flags
-
-// used for debug channel muting
-#define FLAG_MUTE  1
-
-// used for simple interpolation
-#define FLAG_IPOL0 2
-#define FLAG_IPOL1 4
-
-///////////////////////////////////////////////////////////
-
 // MAIN CHANNEL STRUCT
 typedef struct
 {
@@ -190,7 +179,7 @@ typedef union
   union {
    struct {
     int pos;
-    signed short val[4];
+    int val[4];
    } gauss;
    int simple[5]; // 28-32
   } interp;
@@ -204,11 +193,6 @@ typedef struct
  unsigned short  spuStat;
 
  unsigned int    spuAddr;
- union {
-  unsigned char  *spuMemC;
-  unsigned short *spuMem;
- };
- unsigned char * pSpuIrq;
 
  unsigned int    cycles_played;
  unsigned int    cycles_dma_end;
@@ -224,11 +208,34 @@ typedef struct
  unsigned int    dwChannelsAudible;    // not silent channels
  unsigned int    dwChannelDead;        // silent+not useful channels
 
+ unsigned int    XARepeat;
+ unsigned int    XALastVal;
+
+ int             iLeftXAVol;
+ int             iRightXAVol;
+
+ struct {                              // channel volume in the cd controller
+  unsigned char  ll, lr, rl, rr;       // see cdr.Attenuator* in cdrom.c
+ } cdv;                                // applied on spu side for easier emulation
+
+ unsigned int    last_keyon_cycles;
+
+ union {
+  unsigned char  *spuMemC;
+  unsigned short *spuMem;
+ };
+ unsigned char * pSpuIrq;
+
  unsigned char * pSpuBuffer;
  short         * pS;
 
- void (CALLBACK *irqCallback)(void);   // func of main emu, called on spu irq
- void (CALLBACK *cddavCallback)(short, short);
+ SPUCHAN       * s_chan;
+ REVERBInfo    * rvb;
+
+ int           * SSumLR;
+
+ void (CALLBACK *irqCallback)(int);
+ //void (CALLBACK *cddavCallback)(short, short);
  void (CALLBACK *scheduleCallback)(unsigned int);
 
  const xa_decode_t * xapGlobal;
@@ -242,30 +249,21 @@ typedef struct
  unsigned int  * CDDAStart;
  unsigned int  * CDDAEnd;
 
- unsigned int    XARepeat;
- unsigned int    XALastVal;
-
- int             iLeftXAVol;
- int             iRightXAVol;
-
- SPUCHAN       * s_chan;
- REVERBInfo    * rvb;
-
- // buffers
- void          * unused;
- int           * SSumLR;
-
  unsigned short  regArea[0x400];
 
  sample_buf      sb[MAXCHAN];
  int             interpolation;
- sample_buf      sb_thread[MAXCHAN];
+
+#if P_HAVE_PTHREAD || defined(WANT_THREAD_CODE)
+ sample_buf    * sb_thread;
+ sample_buf      sb_thread_[MAXCHAN];
+#endif
 } SPUInfo;
 
 #define regAreaGet(offset) \
-  spu.regArea[((offset) - 0xc00)>>1]
+  spu.regArea[((offset) - 0xc00) >> 1]
 #define regAreaGetCh(ch, offset) \
-  spu.regArea[((ch<<4)|(offset))>>1]
+  spu.regArea[(((ch) << 4) | (offset)) >> 1]
 
 ///////////////////////////////////////////////////////////
 // SPU.C globals
@@ -278,6 +276,7 @@ extern SPUInfo spu;
 void do_samples(unsigned int cycles_to, int do_sync);
 void schedule_next_irq(void);
 void check_irq_io(unsigned int addr);
+void do_irq_io(int cycles_after);
 
 #define do_samples_if_needed(c, sync, samples) \
  do { \
@@ -286,5 +285,8 @@ void check_irq_io(unsigned int addr);
  } while (0)
 
 #endif
+
+void FeedXA(const xa_decode_t *xap);
+void FeedCDDA(unsigned char *pcm, int nBytes);
 
 #endif /* __P_SOUND_EXTERNALS_H__ */

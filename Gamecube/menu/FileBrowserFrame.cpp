@@ -24,6 +24,7 @@
 #include "MenuContext.h"
 #include "FileBrowserFrame.h"
 #include "../libgui/Button.h"
+#include "../libgui/TextBox.h"
 #include "../libgui/resources.h"
 #include "../libgui/MessageBox.h"
 #include "../libgui/FocusManager.h"
@@ -37,6 +38,7 @@ extern "C" {
 #include "../fileBrowser/fileBrowser-CARD.h"
 #include "../fileBrowser/fileBrowser-SMB.h"
 extern long CDR_getTN(unsigned char *buffer);
+void LoadingBar_showBar(float percent, const char* string);
 }
 
 void Func_PrevPage();
@@ -51,24 +53,23 @@ void Func_Select6();
 void Func_Select7();
 void Func_Select8();
 void Func_Select9();
-void Func_Select10();
 
-#define NUM_FRAME_BUTTONS 12
-#define NUM_FILE_SLOTS 10
+#define NUM_FRAME_BUTTONS 11
+#define NUM_FILE_SLOTS 9
 #define FRAME_BUTTONS fileBrowserFrameButtons
 #define FRAME_STRINGS fileBrowserFrameStrings
 
-static char FRAME_STRINGS[3][5] =
+static const char FRAME_STRINGS[3][5] =
 	{ "Prev",
 	  "Next",
 	  ""};
 
-
+const char *loadPath = "FAT";
 struct ButtonInfo
 {
 	menu::Button	*button;
 	int				buttonStyle;
-	char*			buttonString;
+	const char*			buttonString;
 	float			x;
 	float			y;
 	float			width;
@@ -83,16 +84,15 @@ struct ButtonInfo
 { //	button	buttonStyle		buttonString		x		y		width	height	Up	Dwn	Lft	Rt	clickFunc		returnFunc
 	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[0],	 35.0,	220.0,	 70.0,	40.0,	-1,	-1,	-1,	 2,	Func_PrevPage,	Func_ReturnFromFileBrowserFrame }, // Prev
 	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[1],	535.0,	220.0,	 70.0,	40.0,	-1,	-1,	 2,	-1,	Func_NextPage,	Func_ReturnFromFileBrowserFrame }, // Next
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	 40.0,	400.0,	35.0,	11,	 3,	 0,	 1,	Func_Select1,	Func_ReturnFromFileBrowserFrame }, // File Button 1
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	 80.0,	400.0,	35.0,	 2,	 4,	 0,	 1,	Func_Select2,	Func_ReturnFromFileBrowserFrame }, // File Button 2
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	120.0,	400.0,	35.0,	 3,	 5,	 0,	 1,	Func_Select3,	Func_ReturnFromFileBrowserFrame }, // File Button 3
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	160.0,	400.0,	35.0,	 4,	 6,	 0,	 1,	Func_Select4,	Func_ReturnFromFileBrowserFrame }, // File Button 4
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	200.0,	400.0,	35.0,	 5,	 7,	 0,	 1,	Func_Select5,	Func_ReturnFromFileBrowserFrame }, // File Button 5
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	240.0,	400.0,	35.0,	 6,	 8,	 0,	 1,	Func_Select6,	Func_ReturnFromFileBrowserFrame }, // File Button 6
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	280.0,	400.0,	35.0,	 7,	 9,	 0,	 1,	Func_Select7,	Func_ReturnFromFileBrowserFrame }, // File Button 7
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	320.0,	400.0,	35.0,	 8,	10,	 0,	 1,	Func_Select8,	Func_ReturnFromFileBrowserFrame }, // File Button 8
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	360.0,	400.0,	35.0,	 9,	11,	 0,	 1,	Func_Select9,	Func_ReturnFromFileBrowserFrame }, // File Button 9
-	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	400.0,	400.0,	35.0,	10,	 2,	 0,	 1,	Func_Select10,	Func_ReturnFromFileBrowserFrame }, // File Button 10
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	 80.0,	400.0,	35.0,	10,	 3,	 0,	 1,	Func_Select1,	Func_ReturnFromFileBrowserFrame }, // File Button 1
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	120.0,	400.0,	35.0,	 2,	 4,	 0,	 1,	Func_Select2,	Func_ReturnFromFileBrowserFrame }, // File Button 2
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	160.0,	400.0,	35.0,	 3,	 5,	 0,	 1,	Func_Select3,	Func_ReturnFromFileBrowserFrame }, // File Button 3
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	200.0,	400.0,	35.0,	 4,	 6,	 0,	 1,	Func_Select4,	Func_ReturnFromFileBrowserFrame }, // File Button 4
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	240.0,	400.0,	35.0,	 5,	 7,	 0,	 1,	Func_Select5,	Func_ReturnFromFileBrowserFrame }, // File Button 5
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	280.0,	400.0,	35.0,	 6,	 8,	 0,	 1,	Func_Select6,	Func_ReturnFromFileBrowserFrame }, // File Button 6
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	320.0,	400.0,	35.0,	 7,	 9,	 0,	 1,	Func_Select7,	Func_ReturnFromFileBrowserFrame }, // File Button 7
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	360.0,	400.0,	35.0,	 8,	10,	 0,	 1,	Func_Select8,	Func_ReturnFromFileBrowserFrame }, // File Button 8
+	{	NULL,	BTN_A_NRM,	FRAME_STRINGS[2],	120.0,	400.0,	400.0,	35.0,	 9,	2,	 0,	 1,	Func_Select9,	Func_ReturnFromFileBrowserFrame }, // File Button 9
 };
 
 FileBrowserFrame::FileBrowserFrame()
@@ -126,7 +126,8 @@ FileBrowserFrame::FileBrowserFrame()
 	setDefaultFocus(FRAME_BUTTONS[2].button);
 	setBackFunc(Func_ReturnFromFileBrowserFrame);
 	setEnabled(true);
-
+	menu::TextBox *textBox = new menu::TextBox(&loadPath, 320.0f, 50.0f, 1.0f, true);
+	add(textBox);
 }
 
 FileBrowserFrame::~FileBrowserFrame()
@@ -315,7 +316,6 @@ void Func_Select8() { fileBrowserFrame_LoadFile((current_page*NUM_FILE_SLOTS) + 
 
 void Func_Select9() { fileBrowserFrame_LoadFile((current_page*NUM_FILE_SLOTS) + 8); }
 
-void Func_Select10() { fileBrowserFrame_LoadFile((current_page*NUM_FILE_SLOTS) + 9); }
 
 
 static char* filenameFromAbsPath(char* absPath)
@@ -353,7 +353,6 @@ void fileBrowserFrame_OpenDirectory(fileBrowser_file* dir)
 	// Free the old menu stuff
 //	if(menu_items){  free(menu_items);  menu_items  = NULL; }
 	if(dir_entries){ free(dir_entries); dir_entries = NULL; }
-	
 	// Read the directories and return on error
 	num_entries = isoFile_readDir(dir, &dir_entries);
 	if(num_entries <= 0)
@@ -368,6 +367,9 @@ void fileBrowserFrame_OpenDirectory(fileBrowser_file* dir)
 
 	current_page = 0;
 	max_page = (int)ceil((float)num_entries/NUM_FILE_SLOTS);
+	if(isoFile_topLevel->deviceName) {
+		loadPath = &isoFile_topLevel->deviceName[0];
+	}
 	fileBrowserFrame_FillPage();
 }
 
@@ -440,10 +442,9 @@ void fileBrowserFrame_FillPage()
 	//activate next/prev buttons
 	if (current_page > 0) FRAME_BUTTONS[0].button->setActive(true);
 	if (current_page+1 < max_page) FRAME_BUTTONS[1].button->setActive(true);
-	//set default focus past "." and ".." entries
+	//set default focus past the ".." entry
 	int default_index = 0;
-	while ( (!strcmp(filenameFromAbsPath(dir_entries[default_index+(current_page*NUM_FILE_SLOTS)].name),".") ||
-			 !strcmp(filenameFromAbsPath(dir_entries[default_index+(current_page*NUM_FILE_SLOTS)].name),"..")) &&
+	while ( !strcmp(filenameFromAbsPath(dir_entries[default_index+(current_page*NUM_FILE_SLOTS)].name),"..") &&
 			 num_entries > default_index+1 ) default_index++;
 	pMenuContext->getFrame(MenuContext::FRAME_FILEBROWSER)->setDefaultFocus(FRAME_BUTTONS[default_index+2].button);
 }
@@ -470,6 +471,7 @@ void fileBrowserFrame_LoadFile(int i)
 		free(dir);
 		menu::Focus::getInstance().clearPrimaryFocus();
 	} else if (fileBrowserMode == FileBrowserFrame::FILEBROWSER_LOADISO) {
+		LoadingBar_showBar(1.0f, "Loading ...");
 		// We must select this file
 		int ret = loadISO( &dir_entries[i] );
 		
@@ -514,17 +516,17 @@ void fileBrowserFrame_LoadFile(int i)
 			case NATIVESAVEDEVICE_NONE:
 				break;
 			case NATIVESAVEDEVICE_SD:
-				strcat(RomInfo,"\nFound & loaded save from SD card\n");
+				strcat(RomInfo,"\nSave device: SD\n");
 				break;
 			case NATIVESAVEDEVICE_USB:
-				strcat(RomInfo,"\nFound & loaded save from USB device\n");
+				strcat(RomInfo,"\nSave device: USB\n");
 				break;
-			case NATIVESAVEDEVICE_CARDA:
-				strcat(RomInfo,"\nFound & loaded save from memcard in slot A\n");
-				break;
-			case NATIVESAVEDEVICE_CARDB:
-				strcat(RomInfo,"\nFound & loaded save from memcard in slot B\n");
-				break;
+			//case NATIVESAVEDEVICE_CARDA:
+			//	strcat(RomInfo,"\nFound & loaded save from memcard in slot A\n");
+			//	break;
+			//case NATIVESAVEDEVICE_CARDB:
+			//	strcat(RomInfo,"\nFound & loaded save from memcard in slot B\n");
+			//	break;
 			}
 			autoSaveLoaded = NATIVESAVEDEVICE_NONE;
 

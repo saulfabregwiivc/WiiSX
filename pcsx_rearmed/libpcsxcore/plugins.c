@@ -31,9 +31,6 @@ static s64 cdOpenCaseTime = 0;
 GPUupdateLace         GPU_updateLace;
 GPUinit               GPU_init;
 GPUshutdown           GPU_shutdown;
-GPUconfigure          GPU_configure;
-GPUtest               GPU_test;
-GPUabout              GPU_about;
 GPUopen               GPU_open;
 GPUclose              GPU_close;
 GPUreadStatus         GPU_readStatus;
@@ -86,6 +83,7 @@ SPUregisterCallback   SPU_registerCallback;
 SPUregisterScheduleCb SPU_registerScheduleCb;
 SPUasync              SPU_async;
 SPUplayCDDAchannel    SPU_playCDDAchannel;
+SPUsetCDvol           SPU_setCDvol;
 
 PADconfigure          PAD1_configure;
 PADabout              PAD1_about;
@@ -179,7 +177,7 @@ static const char *err;
 
 #define LoadSym(dest, src, name, checkerr) { \
 	dest = (src)SysLoadSym(drv, name); \
-	if (checkerr) { CheckErr(name); } else SysLibError(); \
+	if (checkerr) { CheckErr(name); } \
 }
 
 void *hGPUDriver = NULL;
@@ -213,7 +211,6 @@ static int LoadGPUplugin(const char *GPUdll) {
 
 	hGPUDriver = SysLoadLibrary(GPUdll);
 	if (hGPUDriver == NULL) {
-		GPU_configure = NULL;
 		SysMessage (_("Could not load GPU plugin %s!"), GPUdll); return -1;
 	}
 	drv = hGPUDriver;
@@ -237,9 +234,6 @@ static int LoadGPUplugin(const char *GPUdll) {
 	LoadGpuSym0(showScreenPic, "GPUshowScreenPic");
 	LoadGpuSym0(vBlank, "GPUvBlank");
 	LoadGpuSym0(getScreenInfo, "GPUgetScreenInfo");
-	LoadGpuSym0(configure, "GPUconfigure");
-	LoadGpuSym0(test, "GPUtest");
-	LoadGpuSym0(about, "GPUabout");
 
 	return 0;
 }
@@ -313,13 +307,15 @@ static int LoadCDRplugin(const char *CDRdll) {
 
 static void *hSPUDriver = NULL;
 static void CALLBACK SPU__registerScheduleCb(void (CALLBACK *cb)(unsigned int)) {}
+static void CALLBACK SPU__setCDvol(unsigned char ll, unsigned char lr,
+		unsigned char rl, unsigned char rr, unsigned int cycle) {}
 
 #define LoadSpuSym1(dest, name) \
 	LoadSym(SPU_##dest, SPU##dest, name, TRUE);
 
 #define LoadSpuSym0(dest, name) \
 	LoadSym(SPU_##dest, SPU##dest, name, FALSE); \
-	if (SPU_##dest == NULL) SPU_##dest = (SPU##dest) SPU__##dest;
+	if (SPU_##dest == NULL) SPU_##dest = SPU__##dest;
 
 #define LoadSpuSymN(dest, name) \
 	LoadSym(SPU_##dest, SPU##dest, name, FALSE);
@@ -346,6 +342,7 @@ static int LoadSPUplugin(const char *SPUdll) {
 	LoadSpuSym0(registerScheduleCb, "SPUregisterScheduleCb");
 	LoadSpuSymN(async, "SPUasync");
 	LoadSpuSymN(playCDDAchannel, "SPUplayCDDAchannel");
+	LoadSpuSym0(setCDvol, "SPUsetCDvol");
 
 	return 0;
 }
@@ -490,16 +487,28 @@ static void initBufForRequest(int padIndex, char value) {
 		return;
 	}
 
-	// switch to analog mode automatically after the game finishes init
-	if (value == 0x42 && pads[padIndex].ds.padMode == 0)
-		pads[padIndex].ds.digitalModeFrames++;
-	if (pads[padIndex].ds.digitalModeFrames == 60*4) {
-		pads[padIndex].ds.padMode = 1;
-		pads[padIndex].ds.digitalModeFrames = 0;
-	}
-
-	if ((u32)(frame_counter - pads[padIndex].ds.lastUseFrame) > 60u)
+	if ((u32)(frame_counter - pads[padIndex].ds.lastUseFrame) > 2*60u
+	    && pads[padIndex].ds.configModeUsed
+	    && !Config.hacks.dualshock_init_analog)
+	{
+		//SysPrintf("Pad reset\n");
 		pads[padIndex].ds.padMode = 0; // according to nocash
+		pads[padIndex].ds.autoAnalogTried = 0;
+	}
+	else if (pads[padIndex].ds.padMode == 0 && value == CMD_READ_DATA_AND_VIBRATE
+		 && pads[padIndex].ds.configModeUsed
+		 && !pads[padIndex].ds.configMode
+		 && !pads[padIndex].ds.userToggled)
+	{
+		if (pads[padIndex].ds.autoAnalogTried == 16) {
+			// auto-enable for convenience
+			SysPrintf("Auto-enabling dualshock analog mode.\n");
+			pads[padIndex].ds.padMode = 1;
+			pads[padIndex].ds.autoAnalogTried = 255;
+		}
+		else if (pads[padIndex].ds.autoAnalogTried < 16)
+			pads[padIndex].ds.autoAnalogTried++;
+	}
 	pads[padIndex].ds.lastUseFrame = frame_counter;
 
 	switch (value) {
@@ -562,8 +571,9 @@ static void reqIndex2Treatment(int padIndex, u8 value) {
 			//0x43
 			if (value == 0) {
 				pads[padIndex].ds.configMode = 0;
-			} else {
+			} else if (value == 1) {
 				pads[padIndex].ds.configMode = 1;
+				pads[padIndex].ds.configModeUsed = 1;
 			}
 			break;
 		case CMD_SET_MODE_AND_LOCK :
@@ -584,15 +594,19 @@ static void reqIndex2Treatment(int padIndex, u8 value) {
 				memcpy(buf, resp4C_01, 8);
 			}
 			break;
-		case CMD_READ_DATA_AND_VIBRATE:
-			//mem the vibration value for small motor;
-			pads[padIndex].Vib[0] = value;
-			break;
 	}
 }
 
-static void vibrate(int padIndex) {
+static void ds_update_vibrate(int padIndex) {
 	PadDataS *pad = &pads[padIndex];
+	if (pad->ds.configModeUsed) {
+		pad->Vib[0] = (pad->Vib[0] == 1) ? 1 : 0;
+	}
+	else {
+		// compat mode
+		pad->Vib[0] = (pad->Vib[0] & 0xc0) == 0x40 && (pad->Vib[1] & 1);
+		pad->Vib[1] = 0;
+	}
 	if (pad->Vib[0] != pad->VibF[0] || pad->Vib[1] != pad->VibF[1]) {
 		//value is different update Value and call libretro for vibration
 		pad->VibF[0] = pad->Vib[0];
@@ -615,6 +629,15 @@ static void log_pad(int port, int pos)
 		printf("\n");
 	}
 #endif
+}
+
+static void adjust_analog(unsigned char *b)
+{
+	// ff8 hates 0x80 for whatever reason (broken in 2d area menus),
+	// or is this caused by something else we do wrong??
+	// Also S.C.A.R.S. treats 0x7f as turning left.
+	if (b[6] == 0x7f || b[6] == 0x80)
+		b[6] = 0x81;
 }
 
 // Build response for 0x42 request Pad in port
@@ -694,6 +717,7 @@ static void PADstartPoll_(PadDataS *pad) {
 			stdpar[5] = pad->rightJoyY;
 			stdpar[6] = pad->leftJoyX;
 			stdpar[7] = pad->leftJoyY;
+			adjust_analog(stdpar);
 			memcpy(buf, stdpar, 8);
 			respSize = 8;
 			break;
@@ -706,6 +730,7 @@ static void PADstartPoll_(PadDataS *pad) {
 			stdpar[5] = pad->rightJoyY;
 			stdpar[6] = pad->leftJoyX;
 			stdpar[7] = pad->leftJoyY;
+			adjust_analog(stdpar);
 			memcpy(buf, stdpar, 8);
 			respSize = 8;
 			break;
@@ -733,19 +758,28 @@ static void PADpoll_dualshock(int port, unsigned char value, int pos)
 		case 2:
 			reqIndex2Treatment(port, value);
 			break;
-		case 3:
-			if (pads[port].txData[0] == CMD_READ_DATA_AND_VIBRATE) {
-				// vibration value for the Large motor
-				pads[port].Vib[1] = value;
-
-				vibrate(port);
-			}
-			break;
 		case 7:
 			if (pads[port].txData[0] == CMD_VIBRATION_TOGGLE)
 				memcpy(pads[port].ds.cmd4dConfig, pads[port].txData + 2, 6);
 			break;
 	}
+
+	if (pads[port].txData[0] == CMD_READ_DATA_AND_VIBRATE
+	    && !pads[port].ds.configModeUsed && 2 <= pos && pos < 4)
+	{
+		// "compat" single motor mode
+		pads[port].Vib[pos - 2] = value;
+	}
+	else if (pads[port].txData[0] == CMD_READ_DATA_AND_VIBRATE
+		 && 2 <= pos && pos < 8)
+	{
+		// 0 - weak motor, 1 - strong motor
+		int dev = pads[port].ds.cmd4dConfig[pos - 2];
+		if (dev < 2)
+			pads[port].Vib[dev] = value;
+	}
+	if (pos == respSize - 1)
+		ds_update_vibrate(port);
 }
 
 static unsigned char PADpoll_(int port, unsigned char value, int pos, int *more_data) {
@@ -964,6 +998,17 @@ int padFreeze(void *f, int Mode) {
 	}
 
 	return 0;
+}
+
+int padToggleAnalog(unsigned int index)
+{
+	int r = -1;
+
+	if (index < sizeof(pads) / sizeof(pads[0])) {
+		r = (pads[index].ds.padMode ^= 1);
+		pads[index].ds.userToggled = 1;
+	}
+	return r;
 }
 
 

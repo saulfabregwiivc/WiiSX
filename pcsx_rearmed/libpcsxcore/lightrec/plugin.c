@@ -20,7 +20,7 @@
 #include "../r3000a.h"
 #include "../psxinterpreter.h"
 #include "../psxhle.h"
-#include "../new_dynarec/events.h"
+#include "../psxevents.h"
 
 #include "../frontend/main.h"
 
@@ -163,7 +163,7 @@ static void lightrec_tansition_from_pcsx(struct lightrec_state *state)
 }
 
 static void hw_write_byte(struct lightrec_state *state,
-			  u32 op, void *host, u32 mem, u8 val)
+			  u32 op, void *host, u32 mem, u32 val)
 {
 	lightrec_tansition_to_pcsx(state);
 
@@ -173,7 +173,7 @@ static void hw_write_byte(struct lightrec_state *state,
 }
 
 static void hw_write_half(struct lightrec_state *state,
-			  u32 op, void *host, u32 mem, u16 val)
+			  u32 op, void *host, u32 mem, u32 val)
 {
 	lightrec_tansition_to_pcsx(state);
 
@@ -335,6 +335,14 @@ static void lightrec_enable_ram(struct lightrec_state *state, bool enable)
 
 static bool lightrec_can_hw_direct(u32 kaddr, bool is_write, u8 size)
 {
+	if (is_write && size != 32) {
+		// force32 so must go through handlers
+		if (0x1f801000 <= kaddr && kaddr < 0x1f801024)
+			return false;
+		if ((kaddr & 0x1fffff80) == 0x1f801080) // dma
+			return false;
+	}
+
 	switch (size) {
 	case 8:
 		switch (kaddr) {
@@ -563,7 +571,8 @@ static void lightrec_plugin_execute_block(enum blockExecCaller caller)
 
 static void lightrec_plugin_clear(u32 addr, u32 size)
 {
-	if (addr == 0 && size == UINT32_MAX)
+	if ((addr == 0 && size == UINT32_MAX)
+	    || (lightrec_hacks & LIGHTREC_OPT_INV_DMA_ONLY))
 		lightrec_invalidate_all(lightrec_state);
 	else
 		/* size * 4: PCSX uses DMA units */

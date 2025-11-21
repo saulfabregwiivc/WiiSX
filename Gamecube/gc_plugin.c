@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <zlib.h>
 #include <libpcsxcore/misc.h>
 #include <libpcsxcore/psxcommon.h>
@@ -38,6 +39,9 @@
 #endif //!__GX__
 
 #include <ogc/machine/processor.h>
+
+/* Scale factor of analog sticks / 128 */
+#define ANALOG_SCALE_FACTOR 180
 
 void OnFile_Exit(){}
 
@@ -164,7 +168,7 @@ long PAD2__open(void) {
 #include "wiiSXconfig.h"
 extern int stop;
 //extern void GPUcursor(int iPlayer,int x,int y);
-extern virtualControllers_t virtualControllers[2];
+extern virtualControllers_t virtualControllers[4];
 // Use to invoke func on the mapped controller with args
 #define DO_CONTROL(Control,func,args...) \
 	virtualControllers[Control].control->func( \
@@ -175,99 +179,121 @@ void plat_trigger_vibrate(int pad, int low, int high) {
 		DO_CONTROL(pad, rumble, low);	// TODO vary this based on small/large motor.
 }
 
+// Lightgun vars
+typedef struct XY_POS
+{
+ long x;
+ long y;
+} XyPos_t;
+XyPos_t ptCursorPoint[8];
+unsigned short usCursorActive=0;
+
+
+void setCursor(int iPlayer,int x,int y)
+{
+ if(iPlayer<0) return;
+ if(iPlayer>7) return;
+
+ usCursorActive|=(1<<iPlayer);
+ ptCursorPoint[iPlayer].x=x;
+ ptCursorPoint[iPlayer].y=y;
+}
+
+static inline u8 clamp(int value)
+{
+	if (value < 0)
+		return 0;
+	if (value > 255)
+		return 255;
+
+	return (u8)value;
+}
+
+static inline u8 analog_scale(u8 val)
+{
+	return clamp((int)val * ANALOG_SCALE_FACTOR / 128 + 128 - ANALOG_SCALE_FACTOR);
+}
+
 long PAD1__readPort1(PadDataS *pad) {
 	int pad_index = pad->requestPadIndex;
+	//SysPrintf("Read port 1 called with %i pad index, in use %s\r\n", pad_index, virtualControllers[pad_index].inUse ? "YES":"NO");
 	if(!virtualControllers[pad_index].inUse) return 0;
 
 	static BUTTONS PAD_Data;
-	if(virtualControllers[pad_index].inUse && DO_CONTROL(pad_index, GetKeys, (BUTTONS*)&PAD_Data, virtualControllers[pad_index].config))
+	if(virtualControllers[pad_index].inUse && DO_CONTROL(pad_index, GetKeys, (BUTTONS*)&PAD_Data, virtualControllers[pad_index].config, in_type[pad_index]))
 			stop = 1;
-	switch(controllerType) {
-		case CONTROLLERTYPE_LIGHTGUN:
-			pad->controllerType = PSE_PAD_TYPE_GUNCON;
-			break;
-		case CONTROLLERTYPE_ANALOG:
-			pad->controllerType = PSE_PAD_TYPE_ANALOGPAD;
-			break;
-		default:
-			pad->controllerType = PSE_PAD_TYPE_STANDARD;
-			break;
-	}
+	pad->controllerType = in_type[pad_index];
 	pad->buttonStatus = PAD_Data.btns.All;
 
-	//if (multitap1 == 1)
-	//	pad->portMultitap = 1;
-	//else
-		pad->portMultitap = 0;
+	pad->portMultitap = multitap1;
 
-	if (controllerType == CONTROLLERTYPE_ANALOG || controllerType == CONTROLLERTYPE_LIGHTGUN)
+	usCursorActive=0;
+	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON || in_type[pad_index] == PSE_PAD_TYPE_GUN)
 	{
-		pad->leftJoyX = PAD_Data.leftStickX;
-		pad->leftJoyY = PAD_Data.leftStickY;
-		pad->rightJoyX = PAD_Data.rightStickX;
-		pad->rightJoyY = PAD_Data.rightStickY;
+		pad->leftJoyX = analog_scale(PAD_Data.leftStickX);
+		pad->leftJoyY = analog_scale(PAD_Data.leftStickY);
+		pad->rightJoyX = analog_scale(PAD_Data.rightStickX);
+		pad->rightJoyY = analog_scale(PAD_Data.rightStickY);
 
 		pad->absoluteX = PAD_Data.gunX;
 		pad->absoluteY = PAD_Data.gunY;
-		
-		if(controllerType == CONTROLLERTYPE_LIGHTGUN) {
-			int absX = (pad->absoluteX / 64) + 512;
-			int absY = (pad->absoluteY / 64) + 512;
-			//GPUcursor(pad_index, absX, absY);
+		if(in_type[pad_index] == PSE_PAD_TYPE_GUN) {
+			usCursorActive=1;
+			setCursor(pad_index, pad->absoluteX, pad->absoluteY);
 		}
 	}
-	/*
+	
 	if (in_type[pad_index] == PSE_PAD_TYPE_MOUSE)
 	{
-		pad->moveX = in_mouse[pad_index][0];
-		pad->moveY = in_mouse[pad_index][1];
-	}*/
+		pad->moveX = PAD_Data.mouseX;
+		pad->moveY = PAD_Data.mouseY;
+	}
 
 	return 0;
 }
 
 long PAD2__readPort2(PadDataS *pad) {
 	int pad_index = pad->requestPadIndex;
+	//SysPrintf("Read port 2 called with %i pad index, in use %s\r\n", pad_index, virtualControllers[pad_index].inUse ? "YES":"NO");
+	
+	// If multi-tap is enabled, this comes up as 4 (port 1 will do 0,1,2,3).
+	if(pad_index >=4) return 0;
+	
 	if(!virtualControllers[pad_index].inUse) return 0;
 	
 	static BUTTONS PAD_Data2;
-	if(virtualControllers[pad_index].inUse && DO_CONTROL(pad_index, GetKeys, (BUTTONS*)&PAD_Data2, virtualControllers[pad_index].config))
+	if(virtualControllers[pad_index].inUse && DO_CONTROL(pad_index, GetKeys, (BUTTONS*)&PAD_Data2, virtualControllers[pad_index].config, in_type[pad_index]))
 		stop = 1;
 
-	switch(controllerType) {
-		case CONTROLLERTYPE_LIGHTGUN:
-			pad->controllerType = PSE_PAD_TYPE_GUNCON;
-			break;
-		case CONTROLLERTYPE_ANALOG:
-			pad->controllerType = PSE_PAD_TYPE_ANALOGPAD;
-			break;
-		default:
-			pad->controllerType = PSE_PAD_TYPE_STANDARD;
-			break;
-	}
+	pad->controllerType = in_type[pad_index];
 	pad->buttonStatus = PAD_Data2.btns.All;
 
 	//if (multitap2 == 1)
 	//	pad->portMultitap = 2;
 	//else
 		pad->portMultitap = 0;
-
-	if (controllerType == CONTROLLERTYPE_ANALOG || controllerType == CONTROLLERTYPE_LIGHTGUN)
+	
+	usCursorActive=0;
+	if (in_type[pad_index] == PSE_PAD_TYPE_ANALOGJOY || in_type[pad_index] == PSE_PAD_TYPE_ANALOGPAD || in_type[pad_index] == PSE_PAD_TYPE_NEGCON || in_type[pad_index] == PSE_PAD_TYPE_GUNCON || in_type[pad_index] == PSE_PAD_TYPE_GUN)
 	{
-		pad->leftJoyX = PAD_Data2.leftStickX;
-		pad->leftJoyY = PAD_Data2.leftStickY;
-		pad->rightJoyX = PAD_Data2.rightStickX;
-		pad->rightJoyY = PAD_Data2.rightStickY;
+		pad->leftJoyX = analog_scale(PAD_Data2.leftStickX);
+		pad->leftJoyY = analog_scale(PAD_Data2.leftStickY);
+		pad->rightJoyX = analog_scale(PAD_Data2.rightStickX);
+		pad->rightJoyY = analog_scale(PAD_Data2.rightStickY);
 
 		pad->absoluteX = PAD_Data2.gunX;
 		pad->absoluteY = PAD_Data2.gunY;
+		if(in_type[pad_index] == PSE_PAD_TYPE_GUN) {
+			usCursorActive=1;
+			setCursor(pad_index, pad->absoluteX, pad->absoluteY);
+		}
 	}
 
-	/*if (in_type[pad_index] == PSE_PAD_TYPE_MOUSE)
+	if (in_type[pad_index] == PSE_PAD_TYPE_MOUSE)
 	{
-		pad->moveX = in_mouse[pad_index][0];
-		pad->moveY = in_mouse[pad_index][1];
-	}*/
+		pad->moveX = PAD_Data2.mouseX;
+		pad->moveY = PAD_Data2.mouseY;
+	}
 
 	return 0;
 }
@@ -279,7 +305,7 @@ void SignalExit(int sig) {
 	OnFile_Exit();
 }
 
-void SPUirq(void);
+void SPUirq(int);
 
 #define PARSEPATH(dst, src) \
 	ptr = src + strlen(src); \
@@ -374,9 +400,7 @@ extern char menuActive;
 extern char screenMode;
 static char fpsInfo[32];
 // Lightgun vars
-//PSXPoint_t     ptCursorPoint[8];
-//unsigned short usCursorActive=0;
-//static unsigned long crCursorColor32[8][3]={{0xff,0x00,0x00},{0x00,0xff,0x00},{0x00,0x00,0xff},{0xff,0x00,0xff},{0xff,0xff,0x00},{0x00,0xff,0xff},{0xff,0xff,0xff},{0x7f,0x7f,0x7f}};
+static unsigned long crCursorColor32[8][3]={{0xff,0x00,0x00},{0x00,0xff,0x00},{0x00,0x00,0xff},{0xff,0x00,0xff},{0xff,0xff,0x00},{0x00,0xff,0xff},{0xff,0xff,0xff},{0x7f,0x7f,0x7f}};
 
 static int vsync_enable;
 static int new_frame;
@@ -426,7 +450,10 @@ static void gc_vout_render(void)
 	GX_SetDrawDone();
 }
 
-void GX_Flip(int width, int height, const void* buffer, int pitch, u8 fmt)
+static int screen_w, screen_h;
+
+static void GX_Flip(const void *buffer, int pitch, u8 fmt,
+		    int x, int y, int width, int height)
 {	
 	int h, w;
 	static int oldwidth=0;
@@ -494,57 +521,54 @@ void GX_Flip(int width, int height, const void* buffer, int pitch, u8 fmt)
 			{
 				// Convert from BGR555 LE data to BGR BE, we OR the first bit with "1" to send RGB5A3 mode into RGB555 on the GP (GC/Wii)
 				__asm__ (
-					"lwz 3, 0(%1)\n"
-					"lwz 4, 4(%1)\n"
-					"lwz 5, 0(%2)\n"
-					"lwz 6, 4(%2)\n"
+					"lwz 3, 0(%[src1])\n"
+					"lwz 4, 4(%[src1])\n"
+					"lwz 5, 0(%[src2])\n"
+					"lwz 6, 4(%[src2])\n"
+					"lwz 7, 0(%[src3])\n"
+					"lwz 8, 4(%[src3])\n"
+					"lwz 9, 0(%[src4])\n"
+					"lwz 10, 4(%[src4])\n"
 					
 					"rlwinm 3, 3, 16, 0, 31\n"
 					"rlwinm 4, 4, 16, 0, 31\n"
 					"rlwinm 5, 5, 16, 0, 31\n"
 					"rlwinm 6, 6, 16, 0, 31\n"
+					"rlwinm 7, 7, 16, 0, 31\n"
+					"rlwinm 8, 8, 16, 0, 31\n"
+					"rlwinm 9, 9, 16, 0, 31\n"
+					"rlwinm 10, 10, 16, 0, 31\n"
 					
-					"or 3, 3, %5\n"
-					"or 4, 4, %5\n"
-					"or 5, 5, %5\n"
-					"or 6, 6, %5\n"				
+					"or 3, 3, %[alphamask]\n"
+					"or 4, 4, %[alphamask]\n"
+					"or 5, 5, %[alphamask]\n"
+					"or 6, 6, %[alphamask]\n"
+					"or 7, 7, %[alphamask]\n"
+					"or 8, 8, %[alphamask]\n"
+					"or 9, 9, %[alphamask]\n"
+					"or 10, 10, %[alphamask]\n"					
 					
-					"stwbrx 3, 0, %0\n" 
-					"stwbrx 4, 0, %0\n" 
-					"stwbrx 5, 0, %0\n" 	
-					"stwbrx 6, 0, %0\n" 
-					
-					"lwz 3, 0(%3)\n"
-					"lwz 4, 4(%3)\n"
-					"lwz 5, 0(%4)\n"
-					"lwz 6, 4(%4)\n"
-					
-					"rlwinm 3, 3, 16, 0, 31\n"
-					"rlwinm 4, 4, 16, 0, 31\n"
-					"rlwinm 5, 5, 16, 0, 31\n"
-					"rlwinm 6, 6, 16, 0, 31\n"
-					
-					"or 3, 3, %5\n"
-					"or 4, 4, %5\n"
-					"or 5, 5, %5\n"
-					"or 6, 6, %5\n"
-					
-					"stwbrx 3, 0, %0\n" 
-					"stwbrx 4, 0, %0\n" 					
-					"stwbrx 5, 0, %0\n" 
-					"stwbrx 6, 0, %0" 					
-					: : "r" (wgPipePtr), "r" (src1), "r" (src2), "r" (src3), "r" (src4), "r" (alphaMask) : "memory", "r3", "r4", "r5", "r6");
-					//         %0             %1            %2          %3          %4           %5     
+					"stwbrx 3, 0, %[wgpipe]\n" 
+					"stwbrx 4, 0, %[wgpipe]\n" 
+					"stwbrx 5, 0, %[wgpipe]\n" 	
+					"stwbrx 6, 0, %[wgpipe]\n" 
+					"stwbrx 7, 0, %[wgpipe]\n" 
+					"stwbrx 8, 0, %[wgpipe]\n" 					
+					"stwbrx 9, 0, %[wgpipe]\n" 
+					"stwbrx 10, 0, %[wgpipe]" 					
+					: 
+					: [wgpipe] "r" (wgPipePtr), [src1] "r" (src1), [src2] "r" (src2), [src3] "r" (src3), [src4] "r" (src4), [alphamask] "r" (alphaMask) 
+					: "memory", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10");
 				src1+=2;
 				src2+=2;
 				src3+=2;
 				src4+=2;
 			}
 
-		  src1 += rowpitch;
-		  src2 += rowpitch;
-		  src3 += rowpitch;
-		  src4 += rowpitch;
+			src1 += rowpitch;
+			src2 += rowpitch;
+			src3 += rowpitch;
+			src4 += rowpitch;
 		}
 	}
 	GX_RestoreWriteGatherPipe();
@@ -580,64 +604,69 @@ void GX_Flip(int width, int height, const void* buffer, int pitch, u8 fmt)
 	GX_SetNumTexGens(1);
 	GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
 
-	float xcoord = 1.0;
-	float ycoord = 1.0;
-	if(screenMode == SCREENMODE_16x9_PILLARBOX) xcoord = 640.0/848.0;
+	float ymin = 1.0f - (float)((y + height) * 2) / (float)screen_h;
+	float ymax = 1.0f - (float)y / (float)screen_h;
+	float xmin = (float)x / (float)screen_w - 1.0f;
+	float xmax = (float)((x + width) * 2) / (float)screen_w - 1.0f;
+
+	if(screenMode == SCREENMODE_16x9_PILLARBOX) {
+		xmin *= 640.0f / 848.0f;
+		xmax *= 640.0f / 848.0f;
+	}
 
 	GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-	  GX_Position2f32(-xcoord, ycoord);
+	  GX_Position2f32(xmin, ymax);
 	  GX_TexCoord2f32( 0.0, 0.0);
-	  GX_Position2f32( xcoord, ycoord);
+	  GX_Position2f32(xmax, ymax);
 	  GX_TexCoord2f32( 1.0, 0.0);
-	  GX_Position2f32( xcoord,-ycoord);
+	  GX_Position2f32(xmax, ymin);
 	  GX_TexCoord2f32( 1.0, 1.0);
-	  GX_Position2f32(-xcoord,-ycoord);
+	  GX_Position2f32(xmin, ymin);
 	  GX_TexCoord2f32( 0.0, 1.0);
 	GX_End();
-	
+
 	// Show lightgun cursors
-	//if(usCursorActive) {
-	//	for(int iPlayer=0;iPlayer<8;iPlayer++)                  // -> loop all possible players
-	//	{
-	//		if(usCursorActive&(1<<iPlayer))                   // -> player active?
-	//		{
-	//			// show a small semi-transparent square for the gun target
-	//			int gx = ptCursorPoint[iPlayer].x;
-	//			int gy = ptCursorPoint[iPlayer].y;
-	//			// Take 0 to 1024 and scale it between -1 to 1.
-	//			float startX = (gx < 512 ? (-1 + ((gx)/511.5f)) : ((gx-512)/511.5f));
-	//			float endX = (gx < 512 ? (-1 + ((gx+8)/511.5f)) : (((gx-504))/511.5f));
-	//			
-	//			float startY = (gy > 512 ? (-1 * ((gy-512)/511.5f)) : (1 - ((gy)/511.5f)));
-	//			float endY = (gy > 512 ? (-1 * ((gy-506)/511.5f)) : (1 - ((gy+6)/511.5f)));
-	//			//print_gecko("startX, endX (%.2f, %.2f) startY, endY (%.2f, %.2f)\r\n", startX, endX, startY, endY);
-	//			GX_InvVtxCache();
-	//			GX_InvalidateTexAll();
-	//			GX_ClearVtxDesc();
-	//			GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
-	//			GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
-	//			GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS,	GX_POS_XY,	GX_F32,	0);
-	//			GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8,	0);
-	//			// No textures
-	//			GX_SetNumChans(1);
-	//			GX_SetNumTexGens(0);
-	//			GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
-	//			GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
-	//			
-	//			GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-	//			  GX_Position2f32(endX, endY);
-	//			  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
-	//			  GX_Position2f32( startX, endY);
-	//			  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
-	//			  GX_Position2f32( startX,startY);
-	//			  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
-	//			  GX_Position2f32(endX,startY);
-	//			  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
-	//			GX_End();
-	//
-	//		}
-	//	}
-	//}
+	if(usCursorActive) {
+		for(int iPlayer=0;iPlayer<8;iPlayer++)                  // -> loop all possible players
+		{
+			if(usCursorActive&(1<<iPlayer))                   // -> player active?
+			{
+				// show a small semi-transparent square for the gun target
+				int gx = ptCursorPoint[iPlayer].x;
+				int gy = ptCursorPoint[iPlayer].y;
+				// Take 0 to 1024 and scale it between -1 to 1.
+				float startX = (gx < 512 ? (-1 + ((gx-8)/511.5f)) : ((gx-520)/511.5f));
+				float endX = (gx < 512 ? (-1 + ((gx+8)/511.5f)) : (((gx-504))/511.5f));
+				
+				float startY = (gy > 512 ? (-1 * ((gy-520)/511.5f)) : (1 - ((gy-6)/511.5f)));
+				float endY = (gy > 512 ? (-1 * ((gy-506)/511.5f)) : (1 - ((gy+6)/511.5f)));
+				//print_gecko("startX, endX (%.2f, %.2f) startY, endY (%.2f, %.2f)\r\n", startX, endX, startY, endY);
+				GX_InvVtxCache();
+				GX_InvalidateTexAll();
+				GX_ClearVtxDesc();
+				GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+				GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+				GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS,	GX_POS_XY,	GX_F32,	0);
+				GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8,	0);
+				// No textures
+				GX_SetNumChans(1);
+				GX_SetNumTexGens(0);
+				GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+				GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+
+				GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+				  GX_Position2f32(endX, endY);
+				  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
+				  GX_Position2f32( startX, endY);
+				  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
+				  GX_Position2f32( startX,startY);
+				  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
+				  GX_Position2f32(endX,startY);
+				  GX_Color4u8(crCursorColor32[iPlayer][0], crCursorColor32[iPlayer][1], crCursorColor32[iPlayer][2], 0x80);
+				GX_End();
+			}
+		}
+	}
 
 	//Write menu/debug text on screen
 	GXColor fontColor = {150,255,150,255};
@@ -650,10 +679,6 @@ void GX_Flip(int width, int height, const void* buffer, int pitch, u8 fmt)
 	DEBUG_update();
 	for (i=0;i<DEBUG_TEXT_HEIGHT;i++)
 		IplFont_drawString(10,(10*i+60),text[i], 0.5, false);
-		
-   //reset swap table from GUI/DEBUG
-	GX_SetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_BLUE, GX_CH_GREEN, GX_CH_RED ,GX_CH_ALPHA);
-	GX_SetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP0, GX_TEV_SWAP0);
 
 	gc_vout_render();
 }
@@ -673,7 +698,7 @@ static void gc_vout_flip(const void *vram, int stride, int bgr24,
 		if (menuActive) return;
 
 		// clear the screen, and flush it
-		DEBUG_print("gc_vout_flip_null_vram",DBG_GPU1);
+		//DEBUG_print("gc_vout_flip_null_vram",DBG_GPU1);
 
 		//Write menu/debug text on screen
 		GXColor fontColor = {150,255,150,255};
@@ -694,9 +719,19 @@ static void gc_vout_flip(const void *vram, int stride, int bgr24,
 		return;
 	}
 	if (menuActive) return;
-	GX_Flip(w, h, vram, stride*2, bgr24 ? GX_TF_RGBA8 : GX_TF_RGB5A3);
+
+	//reset swap table from GUI/DEBUG
+	GX_SetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_BLUE, GX_CH_GREEN, GX_CH_RED ,GX_CH_ALPHA);
+	GX_SetTevSwapMode(GX_TEVSTAGE0, GX_TEV_SWAP0, GX_TEV_SWAP0);
+
+	GX_Flip(vram, stride * 2, bgr24 ? GX_TF_RGBA8 : GX_TF_RGB5A3, x, y, w, h);
 }
-static void gc_vout_set_mode(int w, int h, int raw_w, int raw_h, int bpp) {SysPrintf("gc_vout_set_mode\r\n");}
+
+static void gc_vout_set_mode(int w, int h, int raw_w, int raw_h, int bpp) {
+	screen_w = raw_w;
+	screen_h = raw_h;
+}
+
 //static void *gc_mmap(unsigned int size) {}
 //static void gc_munmap(void *ptr, unsigned int size) {}
 
@@ -823,6 +858,14 @@ void plugin_call_rearmed_cbs(void)
 void go(void) {
 	Config.PsxOut = 0;
 	stop = 0;
+	
+	// Enable a multi-tap in port 1 if we have more than 2 mapped controllers.
+	int controllersConnected = 0;
+	for(int i = 0; i < 4; i++) {
+		controllersConnected += ((in_type[i] && virtualControllers[i].inUse) ? 1 : 0);
+	}
+	multitap1 = controllersConnected > 2 ? 1 : 0;
+	SysPrintf("Multi-tap port status: %s\r\n", multitap1 ? "connected" : "disconnected");
 
 	/* Apply settings from menu */
 	gc_rearmed_cbs.gpu_unai.dithering = !!useDithering;
@@ -832,6 +875,9 @@ void go(void) {
 
 	plugin_call_rearmed_cbs();
 	psxCpu->Execute();
+	
+	// remove this callback to avoid any issues when returning to the menu.
+	GX_SetDrawDoneCallback(NULL);
 }
 
 int OpenPlugins() {

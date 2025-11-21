@@ -38,6 +38,7 @@
 #include <libpcsxcore/psxmem.h>
 #include <libpcsxcore/r3000a.h>
 #include <libpcsxcore/sio.h>
+#include <libpcsxcore/cdrom.h>
 #include "wiiSXconfig.h"
 #include "menu/MenuContext.h"
 extern "C" {
@@ -88,6 +89,8 @@ char frameLimit;
 char frameSkip;
 extern char audioEnabled;
 char volume;
+char reverb;
+char deflicker;
 char showFPSonScreen;
 char printToScreen;
 char menuActive;
@@ -104,13 +107,12 @@ char screenMode = 0;
 char videoMode = 0;
 char fileSortMode = 1;
 char padAutoAssign;
-char padType[2];
-char padAssign[2];
+char padType[4];
+char padAssign[4];
 char rumbleEnabled;
 char loadButtonSlot;
-char controllerType;
-char numMultitaps;
 char useDithering;
+int multitap1;	// Multitap in port 1, determined at runtime if we require this based on the number of controllers set.
 
 #define CONFIG_STRING_TYPE 0
 #define CONFIG_STRING_SIZE 256
@@ -118,6 +120,15 @@ char smbUserName[CONFIG_STRING_SIZE];
 char smbPassWord[CONFIG_STRING_SIZE];
 char smbShareName[CONFIG_STRING_SIZE];
 char smbIpAddr[CONFIG_STRING_SIZE];
+
+int in_type[8] = {
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
+   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE
+};
+
+unsigned short in_keystate[8];
 
 extern "C" int stop;
 
@@ -131,6 +142,8 @@ static struct {
 } OPTIONS[] =
 { { "Audio", &audioEnabled, AUDIO_DISABLE, AUDIO_ENABLE },
   { "Volume", &volume, VOLUME_LOUDEST, VOLUME_LOW },
+  { "Reverb", &reverb, REVERB_DISABLE, REVERB_ENABLE },
+  { "Deflicker", &deflicker, DEFLICKER_DISABLE, DEFLICKER_ENABLE },
   { "FPS", &showFPSonScreen, FPS_HIDE, FPS_SHOW },
 //  { "Debug", &printToScreen, DEBUG_HIDE, DEBUG_SHOW },
   { "ScreenMode", &screenMode, SCREENMODE_4x3, SCREENMODE_16x9_PILLARBOX },
@@ -148,12 +161,18 @@ static struct {
   { "PadAutoAssign", &padAutoAssign, PADAUTOASSIGN_MANUAL, PADAUTOASSIGN_AUTOMATIC },
   { "PadType1", &padType[0], PADTYPE_NONE, PADTYPE_WII },
   { "PadType2", &padType[1], PADTYPE_NONE, PADTYPE_WII },
+  { "PadType3", &padType[2], PADTYPE_NONE, PADTYPE_WII },
+  { "PadType4", &padType[3], PADTYPE_NONE, PADTYPE_WII },
   { "PadAssign1", &padAssign[0], PADASSIGN_INPUT0, PADASSIGN_INPUT3 },
   { "PadAssign2", &padAssign[1], PADASSIGN_INPUT0, PADASSIGN_INPUT3 },
+  { "PadAssign3", &padAssign[2], PADASSIGN_INPUT0, PADASSIGN_INPUT3 },
+  { "PadAssign4", &padAssign[3], PADASSIGN_INPUT0, PADASSIGN_INPUT3 },
   { "RumbleEnabled", &rumbleEnabled, RUMBLE_DISABLE, RUMBLE_ENABLE },
   { "LoadButtonSlot", &loadButtonSlot, LOADBUTTON_SLOT0, LOADBUTTON_DEFAULT },
-  { "ControllerType", &controllerType, CONTROLLERTYPE_STANDARD, CONTROLLERTYPE_LIGHTGUN },
-//  { "NumberMultitaps", &numMultitaps, MULTITAPS_NONE, MULTITAPS_TWO },
+  { "ControllerType1", ((char*)(&in_type[0])+3), PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_ANALOGPAD },
+  { "ControllerType2", ((char*)(&in_type[1])+3), PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_ANALOGPAD },
+  { "ControllerType3", ((char*)(&in_type[2])+3), PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_ANALOGPAD },
+  { "ControllerType4", ((char*)(&in_type[3])+3), PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_ANALOGPAD },
   { "smbusername", smbUserName, CONFIG_STRING_TYPE, CONFIG_STRING_TYPE },
   { "smbpassword", smbPassWord, CONFIG_STRING_TYPE, CONFIG_STRING_TYPE },
   { "smbsharename", smbShareName, CONFIG_STRING_TYPE, CONFIG_STRING_TYPE },
@@ -169,6 +188,8 @@ void loadSettings(int argc, char *argv[])
 	// Default Settings
 	audioEnabled     = 1; // Audio
 	volume           = VOLUME_MEDIUM;
+	reverb			 = REVERB_ENABLE;
+	deflicker		 = DEFLICKER_ENABLE;
 #ifdef RELEASE
 	showFPSonScreen  = 0; // Don't show FPS on Screen
 #else
@@ -191,30 +212,34 @@ void loadSettings(int argc, char *argv[])
 	padAutoAssign	 = PADAUTOASSIGN_AUTOMATIC;
 	padType[0]		 = PADTYPE_NONE;
 	padType[1]		 = PADTYPE_NONE;
+	padType[2]		 = PADTYPE_NONE;
+	padType[3]		 = PADTYPE_NONE;
 	padAssign[0]	 = PADASSIGN_INPUT0;
 	padAssign[1]	 = PADASSIGN_INPUT1;
+	padAssign[2]	 = PADASSIGN_INPUT2;
+	padAssign[3]	 = PADASSIGN_INPUT3;
 	rumbleEnabled	 = RUMBLE_ENABLE;
 	loadButtonSlot	 = LOADBUTTON_DEFAULT;
-	controllerType	 = CONTROLLERTYPE_STANDARD;
-	numMultitaps	 = MULTITAPS_NONE;
+	in_type[0]		 = PSE_PAD_TYPE_STANDARD;
+	in_type[1]		 = PSE_PAD_TYPE_STANDARD;
+	in_type[2]		 = PSE_PAD_TYPE_STANDARD;
+	in_type[3]		 = PSE_PAD_TYPE_STANDARD;
 	menuActive = 1;
 
 	//PCSX-specific defaults
 	memset(&Config, 0, sizeof(PcsxConfig));
-	Config.Cpu=dynacore;		//Dynarec core
 	strcpy(Config.Net,"Disabled");
 	Config.PsxOut = 1;
 	Config.HLE = 1;
 	Config.Xa = 0;  //XA enabled
 	Config.Cdda = 0; //CDDA enabled
-	spu_config.iVolume = 1024 - (volume * 192); //Volume="medium" in PEOPSspu
 	spu_config.iUseThread = 0;	// Don't enable, broken on GC/Wii
-	spu_config.iUseReverb = 1;
 	spu_config.iUseInterpolation = 1;
 	spu_config.iXAPitch = 0;
 	spu_config.iTempo = 0;
 	Config.PsxAuto = 1; //Autodetect
 	Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
+	Config.GpuListWalking = -1;
 	LoadCdBios = BOOTTHRUBIOS_NO;
 	
 	strcpy(Config.PluginsDir, "plugins");
@@ -228,8 +253,40 @@ void loadSettings(int argc, char *argv[])
 	//config stuff
 	fileBrowser_file* configFile_file;
 	int (*configFile_init)(fileBrowser_file*) = fileBrowser_libfat_init;
+	// Try SD always first.
+	configFile_file = &saveDir_libfat_Default;
+	if(configFile_init(configFile_file)) {                //only if device initialized ok
+		FILE* f = fopen( "sd:/wiisx/settings.cfg", "r" );  //attempt to open file
+		if(f) {        //open ok, read it
+			readConfig(f);
+			fclose(f);
+		}
+		f = fopen( "sd:/wiisx/controlG.cfg", "r" );  //attempt to open file
+		if(f) {
+			load_configurations(f, &controller_GC);					//read in GC controller mappings
+			fclose(f);
+		}
 #ifdef HW_RVL
-	if(argv[0][0] == 'u') {  //assume USB
+		f = fopen( "sd:/wiisx/controlC.cfg", "r" );  //attempt to open file
+		if(f) {
+			load_configurations(f, &controller_Classic);			//read in Classic controller mappings
+			fclose(f);
+		}
+		f = fopen( "sd:/wiisx/controlN.cfg", "r" );  //attempt to open file
+		if(f) {
+			load_configurations(f, &controller_WiimoteNunchuk);		//read in WM+NC controller mappings
+			fclose(f);
+		}
+		f = fopen( "sd:/wiisx/controlW.cfg", "r" );  //attempt to open file
+		if(f) {
+			load_configurations(f, &controller_Wiimote);			//read in Wiimote controller mappings
+			fclose(f);
+		}
+#endif //HW_RVL
+	}
+#ifdef HW_RVL
+	// On Wii, try USB if SD failed.
+	else {
 		configFile_file = &saveDir_libfat_USB;
 		if(configFile_init(configFile_file)) {                //only if device initialized ok
 			FILE* f = fopen( "usb:/wiisx/settings.cfg", "r" );  //attempt to open file
@@ -242,7 +299,6 @@ void loadSettings(int argc, char *argv[])
 				load_configurations(f, &controller_GC);					//read in GC controller mappings
 				fclose(f);
 			}
-#ifdef HW_RVL
 			f = fopen( "usb:/wiisx/controlC.cfg", "r" );  //attempt to open file
 			if(f) {
 				load_configurations(f, &controller_Classic);			//read in Classic controller mappings
@@ -258,43 +314,9 @@ void loadSettings(int argc, char *argv[])
 				load_configurations(f, &controller_Wiimote);			//read in Wiimote controller mappings
 				fclose(f);
 			}
-#endif //HW_RVL
 		}
 	}
-	else /*if((argv[0][0]=='s') || (argv[0][0]=='/'))*/
-#endif //HW_RVL
-	{ //assume SD
-		configFile_file = &saveDir_libfat_Default;
-		if(configFile_init(configFile_file)) {                //only if device initialized ok
-			FILE* f = fopen( "sd:/wiisx/settings.cfg", "r" );  //attempt to open file
-			if(f) {        //open ok, read it
-				readConfig(f);
-				fclose(f);
-			}
-			f = fopen( "sd:/wiisx/controlG.cfg", "r" );  //attempt to open file
-			if(f) {
-				load_configurations(f, &controller_GC);					//read in GC controller mappings
-				fclose(f);
-			}
-#ifdef HW_RVL
-			f = fopen( "sd:/wiisx/controlC.cfg", "r" );  //attempt to open file
-			if(f) {
-				load_configurations(f, &controller_Classic);			//read in Classic controller mappings
-				fclose(f);
-			}
-			f = fopen( "sd:/wiisx/controlN.cfg", "r" );  //attempt to open file
-			if(f) {
-				load_configurations(f, &controller_WiimoteNunchuk);		//read in WM+NC controller mappings
-				fclose(f);
-			}
-			f = fopen( "sd:/wiisx/controlW.cfg", "r" );  //attempt to open file
-			if(f) {
-				load_configurations(f, &controller_Wiimote);			//read in Wiimote controller mappings
-				fclose(f);
-			}
-#endif //HW_RVL
-		}
-	}
+#endif
 #ifdef HW_RVL
 	// Handle options passed in through arguments
 	int i;
@@ -316,6 +338,9 @@ void loadSettings(int argc, char *argv[])
 
 	//Synch settings with Config
 	Config.Cpu=dynacore;
+	Config.SlowBoot = LoadCdBios;
+	spu_config.iVolume = 1024 - (volume * 192); //Volume="medium" in PEOPSspu
+	spu_config.iUseReverb = reverb;
 }
 
 void ScanPADSandReset(u32 dummy) 
@@ -425,21 +450,28 @@ int main(int argc, char *argv[])
 
 // loadISO loads an ISO file as current media to read from.
 int loadISOSwap(fileBrowser_file* file) {
-  
-  // Refresh file pointers
+    // Refresh file pointers
 	memset(&isoFile, 0, sizeof(fileBrowser_file));
 	memset(&cddaFile, 0, sizeof(fileBrowser_file));
 	memset(&subFile, 0, sizeof(fileBrowser_file));
-	
 	memcpy(&isoFile, file, sizeof(fileBrowser_file) );
 	
-	CDR_close();
+	SysPrintf("selected file: %s\n", &file->name[0]);
+
+	CdromId[0] = '\0';
+	CdromLabel[0] = '\0';
+	
 	SetIsoFile(&file->name[0]);
-	//might need to insert code here to trigger a lid open/close interrupt
-	if(CDR_open() < 0)
+	
+	if (ReloadCdromPlugin() < 0) {
 		return -1;
-	CheckCdrom();
-	LoadCdrom();
+	}
+	if (CDR_open() < 0) {
+		return -1;
+	}
+
+	SetCdOpenCaseTime(time(NULL) + 2);
+	LidInterrupt();
 	return 0;
 }
 
@@ -466,9 +498,8 @@ int loadISO(fileBrowser_file* file)
 	
 	char *tempStr = &file->name[0];
 	if((strstr(tempStr,".EXE")!=NULL) || (strstr(tempStr,".exe")!=NULL)) {
-		//TODO
 		SysReset();
-		//Load(file);
+		Load(tempStr);
 	}
 	else {
 		CheckCdrom();
@@ -505,8 +536,6 @@ int loadISO(fileBrowser_file* file)
 		sprintf(Config.Mcd2,"%s/%s-2.mcd",saveFile_dir,CdromId);
 		SysPrintf("Memory cards:\r\nMcd1 [%s]\r\nMcd2 [%s]\r\n", Config.Mcd1, Config.Mcd2);
 		LoadMcds(Config.Mcd1, Config.Mcd2);
-		
-		saveFile_deinit(saveFile_dir);
 		
 		switch (nativeSaveDevice)
 		{
@@ -612,6 +641,8 @@ int SysInit() {
 		strcat(biosFile->name, "/SCPH1001.BIN");
 		biosFile_init(biosFile);  //initialize the bios device (it might not be the same as ISO device)
 		Config.HLE = 0;
+		strcpy(Config.BiosDir, &biosFile_dir->name[0]);
+		strcpy(Config.Bios, "/SCPH1001.BIN");
 	} else {
 		Config.HLE = 1;
 	}
@@ -693,14 +724,6 @@ void pl_gun_byte2(int port, unsigned char byte)
 {
 }
 
-
-/* TODO: Should be populated properly */
-int in_type[8] = {
-   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
-   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
-   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE,
-   PSE_PAD_TYPE_NONE, PSE_PAD_TYPE_NONE
-};
 
 /* 0x000000 -> 0x200000: RAM (2 MiB)
  * 0x200000 -> 0x210000: Parallel port (64 KiB)
